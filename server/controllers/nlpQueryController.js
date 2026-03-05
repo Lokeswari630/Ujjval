@@ -4,12 +4,14 @@ const HealthPrediction = require('../models/HealthPrediction');
 const MedicineInventory = require('../models/MedicineInventory');
 const NLPQueryHistory = require('../models/NLPQueryHistory');
 const User = require('../models/User');
+const aiHealthPredictor = require('../services/aiHealthPredictor');
 
 const roleSuggestions = {
   patient: [
     'Go to my appointments page',
     'Open my profile page',
-    'Show my upcoming appointments'
+    'Show my upcoming appointments',
+    'I have fever and cough, what should I do at home?'
   ],
   doctor: [
     'Open patient records page',
@@ -29,6 +31,25 @@ const roleSuggestions = {
 };
 
 const getSuggestionsForRole = (role) => roleSuggestions[role] || roleSuggestions.patient;
+
+const extractSymptomsFromQuery = (rawQuery) => {
+  const query = String(rawQuery || '').toLowerCase();
+  const symptomPatterns = [
+    { regex: /fever|temperature|chills/, value: 'fever' },
+    { regex: /cough|cold|sore throat/, value: 'cough' },
+    { regex: /headache|migraine|head pain/, value: 'headache' },
+    { regex: /chest pain|chest tightness|heart pain/, value: 'chest_pain' },
+    { regex: /stomach pain|abdominal pain|belly pain/, value: 'abdominal_pain' },
+    { regex: /shortness of breath|breathing difficulty|breathless/, value: 'shortness_of_breath' },
+    { regex: /nausea|vomiting|throwing up/, value: 'nausea' },
+    { regex: /fatigue|tired|exhausted|weakness/, value: 'fatigue' },
+    { regex: /dizziness|vertigo|lightheaded/, value: 'dizziness' }
+  ];
+
+  return symptomPatterns
+    .filter((item) => item.regex.test(query))
+    .map((item) => item.value);
+};
 
 const parseIntent = (rawQuery) => {
   const query = String(rawQuery || '').trim().toLowerCase();
@@ -82,6 +103,17 @@ const parseIntent = (rawQuery) => {
       intent: 'predictions.latest',
       confidence: 0.9,
       entities: {}
+    };
+  }
+
+  if (has(['symptom', 'fever', 'cough', 'headache', 'chest pain', 'stomach pain', 'breath', 'what should i do', 'home remedy', 'home care'])) {
+    const symptoms = extractSymptomsFromQuery(query);
+    return {
+      intent: 'health.advice',
+      confidence: symptoms.length > 0 ? 0.88 : 0.72,
+      entities: {
+        symptoms
+      }
     };
   }
 
@@ -264,6 +296,50 @@ const executeIntent = async (parsed, user) => {
       resultType: 'prediction',
       data: row ? [row] : [],
       columns: ['predictionDate', 'riskLevel', 'riskScore', 'symptoms']
+    };
+  }
+
+  if (intent === 'health.advice') {
+    const userProfile = await User.findById(user.id).select('age gender').lean();
+    const symptoms = Array.isArray(entities?.symptoms) && entities.symptoms.length > 0
+      ? entities.symptoms
+      : [];
+
+    if (symptoms.length === 0) {
+      return {
+        message: 'Please mention at least one symptom (for example: fever, cough, headache) so I can provide guidance.',
+        resultType: 'prediction',
+        data: [],
+        columns: ['predictionDate', 'riskLevel', 'riskScore', 'symptoms']
+      };
+    }
+
+    const aiAnalysis = await aiHealthPredictor.predictHealthRisk({
+      symptoms,
+      age: Number(userProfile?.age) || 30,
+      gender: userProfile?.gender || 'other',
+      lifestyleFactors: {
+        smoking: 'never',
+        alcohol: 'occasional',
+        exercise: 'moderate',
+        diet: 'average',
+        stress: 'moderate'
+      },
+      vitalSigns: {}
+    });
+
+    return {
+      message: 'AI home-care guidance generated based on your symptoms',
+      resultType: 'prediction',
+      data: [
+        {
+          _id: `nlp-health-${Date.now()}`,
+          predictionDate: new Date(),
+          symptoms,
+          aiAnalysis
+        }
+      ],
+      columns: ['predictionDate', 'riskLevel', 'riskScore', 'symptoms', 'recommendations']
     };
   }
 

@@ -120,8 +120,10 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <Router>
-          <div className="App">
-            <Routes>
+          <div className="App relative min-h-screen overflow-x-hidden">
+            <div className="hospital-bg-overlay" aria-hidden="true" />
+            <div className="relative z-10">
+              <Routes>
               {/* Auth Routes */}
               <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<Auth />} />
@@ -311,9 +313,10 @@ function App() {
                 } 
               />
               
-              <Route path="*" element={<RoleHomeRedirect />} />
-            </Routes>
-            <FloatingNLPWidget />
+                <Route path="*" element={<RoleHomeRedirect />} />
+              </Routes>
+              <FloatingNLPWidget />
+            </div>
           </div>
         </Router>
       </AuthProvider>

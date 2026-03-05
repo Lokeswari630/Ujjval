@@ -1,0 +1,42 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1600" y2="900" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E2E8F0"/>
+      <stop offset="1" stop-color="#CBD5E1"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+
+  <g opacity="0.55" fill="#64748B">
+    <rect x="210" y="300" width="260" height="360" rx="14"/>
+    <rect x="560" y="220" width="340" height="440" rx="14"/>
+    <rect x="980" y="280" width="300" height="380" rx="14"/>
+    <rect x="1300" y="340" width="120" height="320" rx="12"/>
+  </g>
+
+  <g opacity="0.35" fill="#94A3B8">
+    <rect x="245" y="335" width="38" height="38" rx="4"/>
+    <rect x="300" y="335" width="38" height="38" rx="4"/>
+    <rect x="355" y="335" width="38" height="38" rx="4"/>
+
+    <rect x="610" y="265" width="42" height="42" rx="4"/>
+    <rect x="670" y="265" width="42" height="42" rx="4"/>
+    <rect x="730" y="265" width="42" height="42" rx="4"/>
+    <rect x="790" y="265" width="42" height="42" rx="4"/>
+
+    <rect x="1030" y="320" width="40" height="40" rx="4"/>
+    <rect x="1088" y="320" width="40" height="40" rx="4"/>
+    <rect x="1146" y="320" width="40" height="40" rx="4"/>
+  </g>
+
+  <g opacity="0.75" fill="#475569">
+    <rect x="700" y="380" width="60" height="180" rx="8"/>
+    <rect x="640" y="440" width="180" height="60" rx="8"/>
+  </g>
+
+  <g opacity="0.45" fill="#64748B">
+    <circle cx="210" cy="180" r="52"/>
+    <circle cx="1400" cy="160" r="42"/>
+    <circle cx="1320" cy="730" r="62"/>
+  </g>
+</svg>

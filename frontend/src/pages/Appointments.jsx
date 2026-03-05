@@ -103,13 +103,15 @@ const INDIAN_DISTRICTS_BY_STATE = {
   Puducherry: ['Karaikal', 'Mahe', 'Puducherry', 'Yanam']
 };
 
-const initialPrescriptionForm = {
-  diagnosis: '',
-  medicineName: '',
-  dosage: '',
-  frequency: '',
-  duration: '',
-  instructions: ''
+const initialConsultationForm = {
+  prescriptionFileTitle: '',
+  prescriptionFileData: '',
+  prescriptionFileName: '',
+  prescriptionFileType: '',
+  labReportTitle: '',
+  labReportFileData: '',
+  labReportFileName: '',
+  labReportFileType: ''
 };
 
 const getHomePath = (role) => {
@@ -141,7 +143,7 @@ const Appointments = () => {
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [selectedPaymentRequest, setSelectedPaymentRequest] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
-  const [prescriptionForm, setPrescriptionForm] = useState(initialPrescriptionForm);
+  const [consultationForm, setConsultationForm] = useState(initialConsultationForm);
 
   const isPatient = user?.role === 'patient';
   const isDoctor = user?.role === 'doctor';
@@ -458,7 +460,105 @@ const Appointments = () => {
     }
   };
 
-  const submitDiagnosisAndPrescription = async (event) => {
+  const mapAppointmentToConsultationForm = (appointment) => {
+    return {
+      prescriptionFileTitle: '',
+      prescriptionFileData: '',
+      prescriptionFileName: '',
+      prescriptionFileType: '',
+      labReportTitle: '',
+      labReportFileData: '',
+      labReportFileName: '',
+      labReportFileType: ''
+    };
+  };
+
+  const openConsultationWorkspace = async (appointment, markInProgress = false) => {
+    setSubmitting(true);
+    setError('');
+
+    try {
+      if (markInProgress) {
+        await appointmentsAPI.updateStatus(appointment._id, 'in_progress');
+      }
+
+      const appointmentResponse = await appointmentsAPI.getById(appointment._id);
+      const currentAppointment = appointmentResponse?.data || appointment;
+
+      setSelectedAppointment(currentAppointment);
+      setConsultationForm(mapAppointmentToConsultationForm(currentAppointment));
+      await loadAppointments();
+    } catch (workspaceError) {
+      setError(workspaceError?.message || 'Failed to open prescription workspace');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const onLabReportFileChange = (event) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      setConsultationForm((prev) => ({
+        ...prev,
+        labReportFileData: '',
+        labReportFileName: '',
+        labReportFileType: ''
+      }));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setConsultationForm((prev) => ({
+        ...prev,
+        labReportFileData: typeof reader.result === 'string' ? reader.result : '',
+        labReportFileName: file.name,
+        labReportFileType: file.type || ''
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const onPrescriptionFileChange = (event) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      setConsultationForm((prev) => ({
+        ...prev,
+        prescriptionFileData: '',
+        prescriptionFileName: '',
+        prescriptionFileType: ''
+      }));
+      return;
+    }
+
+    if (!file.type?.startsWith('image/')) {
+      setError('Prescription upload supports images only.');
+      setConsultationForm((prev) => ({
+        ...prev,
+        prescriptionFileData: '',
+        prescriptionFileName: '',
+        prescriptionFileType: ''
+      }));
+      return;
+    }
+
+    setError('');
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setConsultationForm((prev) => ({
+        ...prev,
+        prescriptionFileData: typeof reader.result === 'string' ? reader.result : '',
+        prescriptionFileName: file.name,
+        prescriptionFileType: file.type || ''
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const submitConsultationDetails = async (event) => {
     event.preventDefault();
     if (!selectedAppointment?._id) return;
 
@@ -466,32 +566,38 @@ const Appointments = () => {
     setError('');
 
     try {
-      if (prescriptionForm.diagnosis.trim()) {
-        await appointmentsAPI.addDiagnosis(selectedAppointment._id, {
-          diagnosis: prescriptionForm.diagnosis.trim()
-        });
+      const hasPrescriptionFile = Boolean(consultationForm.prescriptionFileData);
+      const hasLabReport = Boolean(consultationForm.labReportFileData);
+
+      if (!hasPrescriptionFile && !hasLabReport) {
+        setError('Upload a prescription image or upload a lab report before saving.');
+        return;
       }
 
-      if (prescriptionForm.medicineName.trim()) {
-        await appointmentsAPI.addPrescription(selectedAppointment._id, {
-          medicines: [
-            {
-              name: prescriptionForm.medicineName.trim(),
-              dosage: prescriptionForm.dosage.trim() || 'As prescribed',
-              frequency: prescriptionForm.frequency.trim() || 'Twice daily',
-              duration: prescriptionForm.duration.trim() || '5 days',
-              instructions: prescriptionForm.instructions.trim()
-            }
-          ],
-          instructions: prescriptionForm.instructions.trim()
-        });
-      }
+      await appointmentsAPI.updateConsultation(selectedAppointment._id, {
+        prescriptionFile: hasPrescriptionFile
+          ? {
+            title: consultationForm.prescriptionFileTitle.trim(),
+            fileName: consultationForm.prescriptionFileName,
+            fileData: consultationForm.prescriptionFileData,
+            mimeType: consultationForm.prescriptionFileType
+          }
+          : undefined,
+        labReport: hasLabReport
+          ? {
+            title: consultationForm.labReportTitle.trim(),
+            fileName: consultationForm.labReportFileName,
+            fileData: consultationForm.labReportFileData,
+            mimeType: consultationForm.labReportFileType
+          }
+          : undefined
+      });
 
       setSelectedAppointment(null);
-      setPrescriptionForm(initialPrescriptionForm);
+      setConsultationForm(initialConsultationForm);
       await loadAppointments();
     } catch (saveError) {
-      setError(saveError?.message || 'Failed to save diagnosis/prescription');
+      setError(saveError?.message || 'Failed to save prescription image or lab report');
     } finally {
       setSubmitting(false);
     }
@@ -792,9 +898,6 @@ const Appointments = () => {
                         <User className="w-4 h-4" />
                         Patient: {appointment?.patientId?.name || user?.name || 'N/A'}
                       </p>
-                      {appointment?.diagnosis && (
-                        <p className="text-sm text-gray-700">Diagnosis: {appointment.diagnosis}</p>
-                      )}
                       {appointment?.paymentProof?.utrNumber && (
                         <p className="text-sm text-gray-700">UTR: {appointment.paymentProof.utrNumber}</p>
                       )}
@@ -815,6 +918,42 @@ const Appointments = () => {
                         <p className="text-sm text-gray-700">
                           Prescription: {appointment.prescription.medicines.map((medicine) => medicine.name).join(', ')}
                         </p>
+                      )}
+                      {appointment?.prescriptionFiles?.length > 0 && (
+                        <div className="text-sm text-gray-700">
+                          <p className="font-medium">Prescription Files:</p>
+                          <div className="mt-1 space-y-1">
+                            {appointment.prescriptionFiles.map((prescriptionFile, prescriptionIndex) => (
+                              <a
+                                key={`${appointment._id}-prescription-${prescriptionIndex}`}
+                                href={prescriptionFile.fileUrl || prescriptionFile.fileData}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block text-blue-700 underline"
+                              >
+                                {prescriptionFile.title || prescriptionFile.fileName || `Prescription ${prescriptionIndex + 1}`}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {appointment?.labReports?.length > 0 && (
+                        <div className="text-sm text-gray-700">
+                          <p className="font-medium">Lab Reports:</p>
+                          <div className="mt-1 space-y-1">
+                            {appointment.labReports.map((report, reportIndex) => (
+                              <a
+                                key={`${appointment._id}-report-${reportIndex}`}
+                                href={report.fileUrl || report.fileData}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block text-blue-700 underline"
+                              >
+                                {report.title || report.fileName || `Lab Report ${reportIndex + 1}`}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
                       )}
                     </div>
 
@@ -837,10 +976,10 @@ const Appointments = () => {
                       {isDoctor && ['scheduled', 'confirmed'].includes(appointment.status) && (
                         <Button
                           size="sm"
-                          onClick={() => updateStatus(appointment._id, 'in_progress')}
+                          onClick={() => openConsultationWorkspace(appointment, true)}
                           loading={submitting}
                         >
-                          Start
+                          Start & Prescribe
                         </Button>
                       )}
 
@@ -887,9 +1026,9 @@ const Appointments = () => {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => setSelectedAppointment(appointment)}
+                          onClick={() => openConsultationWorkspace(appointment, false)}
                         >
-                          Add Notes
+                          Prescription
                         </Button>
                       )}
                     </div>
@@ -905,59 +1044,81 @@ const Appointments = () => {
         isOpen={Boolean(selectedAppointment)}
         onClose={() => {
           setSelectedAppointment(null);
-          setPrescriptionForm(initialPrescriptionForm);
+          setConsultationForm(initialConsultationForm);
         }}
-        title="Add Diagnosis & Prescription"
+        title="Upload Prescription"
       >
-        <form onSubmit={submitDiagnosisAndPrescription} className="space-y-3">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Diagnosis</label>
-            <textarea
-              value={prescriptionForm.diagnosis}
-              onChange={(event) => setPrescriptionForm((prev) => ({ ...prev, diagnosis: event.target.value }))}
-              rows={2}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Enter diagnosis"
-            />
+        <form onSubmit={submitConsultationDetails} className="space-y-3">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+            <p><span className="font-medium">Patient:</span> {selectedAppointment?.patientId?.name || 'N/A'}</p>
+            <p><span className="font-medium">Email:</span> {selectedAppointment?.patientId?.email || 'N/A'}</p>
+            <p><span className="font-medium">Phone:</span> {selectedAppointment?.patientId?.phone || 'N/A'}</p>
+            <p><span className="font-medium">Age/Gender:</span> {selectedAppointment?.patientId?.age || 'N/A'} / {selectedAppointment?.patientId?.gender || 'N/A'}</p>
+            <p><span className="font-medium">Symptoms:</span> {selectedAppointment?.symptoms?.join(', ') || 'None reported'}</p>
+            <p><span className="font-medium">Description:</span> {selectedAppointment?.description || 'No additional description'}</p>
+
+            {Array.isArray(selectedAppointment?.prescriptionFiles) && selectedAppointment.prescriptionFiles.length > 0 && (
+              <div className="mt-2">
+                <p className="font-medium">Uploaded Prescriptions:</p>
+                <div className="mt-1 space-y-1">
+                  {selectedAppointment.prescriptionFiles.map((prescriptionFile, index) => (
+                    <a
+                      key={`${selectedAppointment?._id || 'appointment'}-modal-prescription-${index}`}
+                      href={prescriptionFile.fileUrl || prescriptionFile.fileData}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block text-blue-700 underline"
+                    >
+                      {prescriptionFile.title || prescriptionFile.fileName || `Prescription ${index + 1}`}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
-          <Input
-            label="Medicine Name"
-            value={prescriptionForm.medicineName}
-            onChange={(event) => setPrescriptionForm((prev) => ({ ...prev, medicineName: event.target.value }))}
-            placeholder="Paracetamol"
-          />
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+            <p className="text-sm font-medium text-gray-800">Prescription File Upload</p>
             <Input
-              label="Dosage"
-              value={prescriptionForm.dosage}
-              onChange={(event) => setPrescriptionForm((prev) => ({ ...prev, dosage: event.target.value }))}
-              placeholder="500mg"
+              label="Prescription Title"
+              value={consultationForm.prescriptionFileTitle}
+              onChange={(event) => setConsultationForm((prev) => ({ ...prev, prescriptionFileTitle: event.target.value }))}
+              placeholder="Prescription - Fever"
             />
-            <Input
-              label="Frequency"
-              value={prescriptionForm.frequency}
-              onChange={(event) => setPrescriptionForm((prev) => ({ ...prev, frequency: event.target.value }))}
-              placeholder="Twice daily"
-            />
-            <Input
-              label="Duration"
-              value={prescriptionForm.duration}
-              onChange={(event) => setPrescriptionForm((prev) => ({ ...prev, duration: event.target.value }))}
-              placeholder="5 days"
-            />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Upload Prescription</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={onPrescriptionFileChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+              {consultationForm.prescriptionFileName && (
+                <p className="mt-1 text-xs text-gray-600">Selected: {consultationForm.prescriptionFileName}</p>
+              )}
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Instructions</label>
-            <textarea
-              value={prescriptionForm.instructions}
-              onChange={(event) => setPrescriptionForm((prev) => ({ ...prev, instructions: event.target.value }))}
-              rows={2}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Take after meal"
+          <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+            <p className="text-sm font-medium text-gray-800">Lab Report Upload</p>
+            <Input
+              label="Report Title"
+              value={consultationForm.labReportTitle}
+              onChange={(event) => setConsultationForm((prev) => ({ ...prev, labReportTitle: event.target.value }))}
+              placeholder="CBC Report"
             />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Upload Lab Report</label>
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                onChange={onLabReportFileChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+              {consultationForm.labReportFileName && (
+                <p className="mt-1 text-xs text-gray-600">Selected: {consultationForm.labReportFileName}</p>
+              )}
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
@@ -966,12 +1127,12 @@ const Appointments = () => {
               variant="outline"
               onClick={() => {
                 setSelectedAppointment(null);
-                setPrescriptionForm(initialPrescriptionForm);
+                setConsultationForm(initialConsultationForm);
               }}
             >
               Close
             </Button>
-            <Button type="submit" loading={submitting}>Save</Button>
+            <Button type="submit" loading={submitting}>Save Prescription</Button>
           </div>
         </form>
       </Modal>

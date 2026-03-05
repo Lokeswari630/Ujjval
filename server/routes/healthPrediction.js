@@ -19,14 +19,30 @@ router.post('/predict', authorize('patient'), async (req, res, next) => {
       age,
       gender,
       lifestyleFactors,
-      vitalSigns
+      vitalSigns,
+      reportContext,
+      reportUpload
     } = req.body;
 
+    const normalizedSymptoms = Array.isArray(symptoms)
+      ? symptoms.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+
+    const normalizedReportUpload = reportUpload && typeof reportUpload === 'object'
+      ? {
+        fileName: String(reportUpload.fileName || '').trim(),
+        fileType: String(reportUpload.fileType || '').trim(),
+        fileData: String(reportUpload.fileData || '').trim()
+      }
+      : undefined;
+
+    const hasReportUpload = Boolean(normalizedReportUpload?.fileData);
+
     // Validate required fields
-    if (!symptoms || !Array.isArray(symptoms) || symptoms.length === 0) {
+    if (normalizedSymptoms.length === 0 && !hasReportUpload) {
       return res.status(400).json({
         success: false,
-        message: 'Symptoms are required and must be an array'
+        message: 'Please provide symptoms or upload a health report file'
       });
     }
 
@@ -39,7 +55,7 @@ router.post('/predict', authorize('patient'), async (req, res, next) => {
 
     // Get AI analysis
     const patientData = {
-      symptoms,
+      symptoms: normalizedSymptoms,
       age,
       gender,
       lifestyleFactors: lifestyleFactors || {
@@ -49,20 +65,47 @@ router.post('/predict', authorize('patient'), async (req, res, next) => {
         diet: 'average',
         stress: 'moderate'
       },
-      vitalSigns: vitalSigns || {}
+      vitalSigns: vitalSigns || {},
+      reportContext: typeof reportContext === 'string' ? reportContext.trim() : '',
+      reportUpload: normalizedReportUpload
     };
 
     const aiAnalysis = await aiHealthPredictor.predictHealthRisk(patientData);
 
+    const normalizedRecommendations = Array.isArray(aiAnalysis?.recommendations)
+      ? aiAnalysis.recommendations
+        .map((item) => {
+          if (typeof item === 'string') {
+            return {
+              type: item.trim(),
+              priority: 'medium'
+            };
+          }
+
+          return {
+            type: String(item?.type || '').trim(),
+            priority: ['low', 'medium', 'high'].includes(String(item?.priority || '').toLowerCase())
+              ? String(item.priority).toLowerCase()
+              : 'medium'
+          };
+        })
+        .filter((item) => item.type)
+      : [];
+
+    const normalizedAiAnalysis = {
+      ...aiAnalysis,
+      recommendations: normalizedRecommendations
+    };
+
     // Create health prediction record
     const healthPrediction = await HealthPrediction.create({
       patientId: req.user.id,
-      symptoms,
+      symptoms: normalizedSymptoms,
       age,
       gender,
       lifestyleFactors: patientData.lifestyleFactors,
       vitalSigns: patientData.vitalSigns,
-      aiAnalysis
+      aiAnalysis: normalizedAiAnalysis
     });
 
     const populatedPrediction = await HealthPrediction.findById(healthPrediction._id)
@@ -125,7 +168,7 @@ router.post('/explain-report', async (req, res, next) => {
       });
     }
 
-    const explanation = medicalReportExplainer.explain(reportText);
+    const explanation = await medicalReportExplainer.explain(reportText);
 
     res.status(200).json({
       success: true,

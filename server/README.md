@@ -40,6 +40,13 @@ JWT_EXPIRE=7d
 # CORS Configuration
 FRONTEND_URL=http://localhost:3000
 FRONTEND_URLS=http://localhost:3000,http://localhost:5173,http://localhost:5174
+
+# External AI for health prediction recommendations (optional)
+HEALTH_AI_API_URL=https://api.openai.com/v1/chat/completions
+HEALTH_AI_MODEL=gpt-4o-mini
+HEALTH_AI_API_KEY=
+OPENAI_API_KEY=
+HEALTH_AI_TIMEOUT_MS=12000
 ```
 
 4. **Start MongoDB**

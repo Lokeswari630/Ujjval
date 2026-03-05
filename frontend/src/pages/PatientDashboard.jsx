@@ -45,7 +45,7 @@ const PatientDashboard = () => {
     const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
 
-    if (tab === 'overview' || tab === 'analytics' || tab === 'prescriptions') {
+    if (tab === 'overview' || tab === 'analytics' || tab === 'appointments' || tab === 'prescriptions') {
       setActiveTab(tab);
     }
   }, [location.search]);
@@ -188,7 +188,10 @@ const PatientDashboard = () => {
     }
 
     if (prescriptionFilters.recordType === 'prescription') {
-      return Array.isArray(appointment?.prescription?.medicines) && appointment.prescription.medicines.length > 0;
+      return (
+        (Array.isArray(appointment?.prescription?.medicines) && appointment.prescription.medicines.length > 0) ||
+        (Array.isArray(appointment?.prescriptionFiles) && appointment.prescriptionFiles.length > 0)
+      );
     }
 
     if (prescriptionFilters.recordType === 'diagnosis') {
@@ -243,6 +246,10 @@ const PatientDashboard = () => {
       const medicines = Array.isArray(appointment?.prescription?.medicines)
         ? appointment.prescription.medicines.map((medicine) => `${medicine.name} (${medicine.dosage}, ${medicine.frequency}, ${medicine.duration})`).join(', ')
         : '';
+      const prescriptionFiles = Array.isArray(appointment?.prescriptionFiles)
+        ? appointment.prescriptionFiles.map((file, fileIndex) => file?.title || file?.fileName || `Prescription ${fileIndex + 1}`).join(', ')
+        : '';
+      const prescriptionSummary = [medicines, prescriptionFiles].filter(Boolean).join(' | ');
 
       return `
         <tr>
@@ -250,7 +257,7 @@ const PatientDashboard = () => {
           <td>${escapeHtml(appointment?.doctorId?.userId?.name || 'Doctor')}</td>
           <td>${escapeHtml(appointment?.date ? new Date(appointment.date).toLocaleDateString() : '-')}</td>
           <td>${escapeHtml(appointment?.diagnosis || '-')}</td>
-          <td>${escapeHtml(medicines || '-')}</td>
+          <td>${escapeHtml(prescriptionSummary || '-')}</td>
           <td>${escapeHtml(appointment?.notes || appointment?.description || '-')}</td>
         </tr>
       `;
@@ -495,6 +502,99 @@ const PatientDashboard = () => {
     </div>
   );
 
+  const renderAppointments = () => (
+    <div className="bg-white rounded-lg shadow">
+      <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+        <h3 className="text-lg font-semibold text-gray-900">My Appointments</h3>
+        <span className="text-sm text-gray-500">{data.appointments.length} appointments</span>
+      </div>
+
+      {data.appointments.length === 0 ? (
+        <div className="p-6 text-center text-gray-500">No appointments found.</div>
+      ) : (
+        <div className="divide-y divide-gray-200">
+          {data.appointments.map((appointment) => (
+            <div key={appointment._id} className="p-4 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-medium text-gray-900">{appointment?.doctorId?.userId?.name || 'Doctor'}</p>
+                <span className="text-sm text-gray-600">
+                  {appointment?.date ? new Date(appointment.date).toLocaleDateString() : '-'} • {appointment?.startTime || '--:--'} - {appointment?.endTime || '--:--'}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  {appointment?.status || 'scheduled'}
+                </span>
+                {appointment?.type && (
+                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 capitalize">
+                    {appointment.type.replace('_', ' ')}
+                  </span>
+                )}
+              </div>
+
+              {Array.isArray(appointment?.symptoms) && appointment.symptoms.length > 0 && (
+                <p className="text-sm text-gray-700">
+                  <span className="font-medium">Symptoms:</span> {appointment.symptoms.join(', ')}
+                </p>
+              )}
+
+              {appointment?.description && (
+                <p className="text-sm text-gray-700">
+                  <span className="font-medium">Description:</span> {appointment.description}
+                </p>
+              )}
+
+              {appointment?.diagnosis && (
+                <p className="text-sm text-gray-700">
+                  <span className="font-medium">Diagnosis:</span> {appointment.diagnosis}
+                </p>
+              )}
+
+              {Array.isArray(appointment?.prescriptionFiles) && appointment.prescriptionFiles.length > 0 && (
+                <div className="text-sm text-gray-700">
+                  <p className="font-medium">Prescriptions:</p>
+                  <div className="mt-1 space-y-1">
+                    {appointment.prescriptionFiles.map((prescriptionFile, index) => (
+                      <a
+                        key={`${appointment._id}-appointment-prescription-${index}`}
+                        href={prescriptionFile.fileUrl || prescriptionFile.fileData}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block text-blue-700 underline"
+                      >
+                        {prescriptionFile.title || prescriptionFile.fileName || `Prescription ${index + 1}`}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {Array.isArray(appointment?.labReports) && appointment.labReports.length > 0 && (
+                <div className="text-sm text-gray-700">
+                  <p className="font-medium">Lab Reports:</p>
+                  <div className="mt-1 space-y-1">
+                    {appointment.labReports.map((report, index) => (
+                      <a
+                        key={`${appointment._id}-appointment-lab-${index}`}
+                        href={report.fileUrl || report.fileData}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block text-blue-700 underline"
+                      >
+                        {report.title || report.fileName || `Lab Report ${index + 1}`}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   const renderPrescriptions = () => (
     <div className="space-y-6">
       <form onSubmit={applyPrescriptionFilters} className="bg-white rounded-lg shadow p-4 grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -597,6 +697,25 @@ const PatientDashboard = () => {
                   </div>
                 )}
 
+                {Array.isArray(appointment?.prescriptionFiles) && appointment.prescriptionFiles.length > 0 && (
+                  <div className="text-sm text-gray-700">
+                    <p className="font-medium">Uploaded Prescriptions:</p>
+                    <div className="mt-1 space-y-1">
+                      {appointment.prescriptionFiles.map((prescriptionFile, index) => (
+                        <a
+                          key={`${appointment._id}-prescription-file-${index}`}
+                          href={prescriptionFile.fileUrl || prescriptionFile.fileData}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block text-blue-700 underline"
+                        >
+                          {prescriptionFile.title || prescriptionFile.fileName || `Prescription ${index + 1}`}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {(appointment?.notes || appointment?.description) && (
                   <p className="text-sm text-gray-700">
                     <span className="font-medium">Reports / Notes:</span> {appointment.notes || appointment.description}
@@ -624,7 +743,7 @@ const PatientDashboard = () => {
 
         {reportInsight && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <p className="text-sm text-gray-800">{reportInsight.summary}</p>
+            <p className="text-sm text-gray-800 whitespace-pre-line">{reportInsight.summary}</p>
             <p className="text-xs text-gray-600 mt-2">Risk: {reportInsight.overallRisk}</p>
           </div>
         )}
@@ -659,6 +778,7 @@ const PatientDashboard = () => {
   const tabs = [
     { id: 'overview', label: 'Overview', icon: <Activity className="w-4 h-4" /> },
     { id: 'analytics', label: 'Analytics', icon: <TrendingUp className="w-4 h-4" /> },
+    { id: 'appointments', label: 'My Appointments', icon: <Calendar className="w-4 h-4" /> },
     { id: 'prescriptions', label: 'Prescriptions', icon: <FileText className="w-4 h-4" /> }
   ];
 
@@ -722,6 +842,7 @@ const PatientDashboard = () => {
           <>
             {activeTab === 'overview' && renderOverview()}
             {activeTab === 'analytics' && renderAnalytics()}
+            {activeTab === 'appointments' && renderAppointments()}
             {activeTab === 'prescriptions' && renderPrescriptions()}
           </>
         )}

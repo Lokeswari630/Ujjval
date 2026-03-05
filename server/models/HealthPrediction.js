@@ -111,7 +111,11 @@ const healthPredictionSchema = new mongoose.Schema({
       description: String
     }],
     recommendations: [{
-      type: String,
+      type: {
+        type: String,
+        required: true,
+        trim: true
+      },
       priority: {
         type: String,
         enum: ['low', 'medium', 'high'],

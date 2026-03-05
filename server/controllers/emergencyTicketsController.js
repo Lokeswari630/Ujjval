@@ -173,7 +173,66 @@ const getDoctorEmergencyFeed = async (req, res, next) => {
   }
 };
 
+const updateEmergencyTicketStatus = async (req, res, next) => {
+  try {
+    const { status } = req.body;
+
+    if (!['acknowledged', 'resolved'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid status. Allowed values: acknowledged, resolved'
+      });
+    }
+
+    const doctorProfile = await Doctor.findOne({ userId: req.user.id });
+    if (!doctorProfile) {
+      return res.status(404).json({
+        success: false,
+        message: 'Doctor profile not found'
+      });
+    }
+
+    const ticket = await EmergencyTicket.findById(req.params.id);
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: 'Emergency ticket not found'
+      });
+    }
+
+    const isNotifiedDoctor = ticket.notifiedDoctors.some(
+      (notice) => notice?.doctorId?.toString() === doctorProfile._id.toString()
+    );
+
+    if (!isNotifiedDoctor) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied for this emergency ticket'
+      });
+    }
+
+    if (ticket.status === 'resolved') {
+      return res.status(400).json({
+        success: false,
+        message: 'Emergency ticket is already resolved'
+      });
+    }
+
+    ticket.status = status;
+    await ticket.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Emergency ticket marked as ${status}.`,
+      data: ticket
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createEmergencyTicket,
-  getDoctorEmergencyFeed
+  getDoctorEmergencyFeed,
+  updateEmergencyTicketStatus
 };

@@ -271,6 +271,21 @@ const NLPChat = () => {
           <p><span className="font-medium">Risk:</span> {latest?.aiAnalysis?.riskLevel || 'N/A'}</p>
           <p><span className="font-medium">Score:</span> {latest?.aiAnalysis?.riskScore ?? 'N/A'}</p>
           <p><span className="font-medium">Date:</span> {latest?.predictionDate ? new Date(latest.predictionDate).toLocaleString() : 'N/A'}</p>
+          {Array.isArray(latest?.symptoms) && latest.symptoms.length > 0 && (
+            <p><span className="font-medium">Symptoms:</span> {latest.symptoms.join(', ')}</p>
+          )}
+          {Array.isArray(latest?.aiAnalysis?.recommendations) && latest.aiAnalysis.recommendations.length > 0 && (
+            <div>
+              <p className="font-medium">Guidance:</p>
+              <ul className="list-disc ml-4 mt-1 space-y-1">
+                {latest.aiAnalysis.recommendations.slice(0, 4).map((item, index) => (
+                  <li key={`rec-${index}`}>
+                    {item?.type || 'Recommendation'}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       );
     }

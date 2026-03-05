@@ -35,7 +35,7 @@ const getAppointments = async (req, res, next) => {
     }
 
     const appointments = await Appointment.find(query)
-      .populate('patientId', 'name email phone age gender')
+      .populate('patientId', 'name email phone age gender address')
       .populate('doctorId', 'userId specialization consultationFee')
       .populate({
         path: 'doctorId',
@@ -561,6 +561,156 @@ const addDiagnosis = async (req, res, next) => {
   }
 };
 
+const updateConsultationDetails = async (req, res, next) => {
+  try {
+    const {
+      diagnosis,
+      consultationNotes,
+      prescription,
+      labReport,
+      prescriptionFile
+    } = req.body;
+
+    const appointment = await Appointment.findById(req.params.id);
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+
+    const doctor = await Doctor.findOne({ userId: req.user.id });
+    if (!doctor || appointment.doctorId.toString() !== doctor._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
+      });
+    }
+
+    const hasDiagnosis = typeof diagnosis === 'string' && diagnosis.trim();
+    const hasNotes = typeof consultationNotes === 'string' && consultationNotes.trim();
+    const hasPrescription = prescription && typeof prescription === 'object';
+    const hasLabReport = labReport && typeof labReport === 'object' && (labReport.fileData || labReport.fileUrl);
+    const hasPrescriptionFile = prescriptionFile && typeof prescriptionFile === 'object' && (prescriptionFile.fileData || prescriptionFile.fileUrl);
+
+    const prescriptionFileMimeType = String(prescriptionFile?.mimeType || '').trim().toLowerCase();
+    const prescriptionFileData = String(prescriptionFile?.fileData || '').trim().toLowerCase();
+    const prescriptionFileName = String(prescriptionFile?.fileName || '').trim().toLowerCase();
+    const prescriptionFileUrl = String(prescriptionFile?.fileUrl || '').trim().toLowerCase();
+    const hasImageMimeType = prescriptionFileMimeType.startsWith('image/');
+    const hasImageDataUri = prescriptionFileData.startsWith('data:image/');
+    const hasImageFileName = /\.(png|jpg|jpeg|webp|gif|bmp|tif|tiff|heic|heif|svg)$/.test(prescriptionFileName);
+    const hasImageFileUrl = /\.(png|jpg|jpeg|webp|gif|bmp|tif|tiff|heic|heif|svg)(\?.*)?$/.test(prescriptionFileUrl);
+    const isPrescriptionImage = hasImageMimeType || hasImageDataUri || hasImageFileName || hasImageFileUrl;
+
+    if (!hasDiagnosis && !hasNotes && !hasPrescription && !hasLabReport && !hasPrescriptionFile) {
+      return res.status(400).json({
+        success: false,
+        message: 'Add a prescription, prescription file, or lab report before saving'
+      });
+    }
+
+    if (hasPrescriptionFile && !isPrescriptionImage) {
+      return res.status(400).json({
+        success: false,
+        message: 'Prescription upload must be an image file'
+      });
+    }
+
+    if (hasDiagnosis) {
+      appointment.diagnosis = diagnosis.trim();
+    }
+
+    if (hasNotes) {
+      appointment.notes = consultationNotes.trim();
+    }
+
+    if (hasPrescription) {
+      const medicines = Array.isArray(prescription.medicines)
+        ? prescription.medicines
+          .filter((medicine) => medicine?.name)
+          .map((medicine) => ({
+            name: String(medicine.name || '').trim(),
+            dosage: String(medicine.dosage || 'As prescribed').trim(),
+            frequency: String(medicine.frequency || 'As prescribed').trim(),
+            duration: String(medicine.duration || 'As prescribed').trim(),
+            instructions: String(medicine.instructions || '').trim()
+          }))
+        : [];
+
+      appointment.prescription = {
+        medicines,
+        instructions: String(prescription.instructions || '').trim(),
+        followUpDate: prescription.followUpDate ? new Date(prescription.followUpDate) : undefined,
+        issuedAt: new Date()
+      };
+    }
+
+    if (hasLabReport) {
+      appointment.labReports.push({
+        title: String(labReport.title || '').trim(),
+        fileName: String(labReport.fileName || '').trim(),
+        fileData: String(labReport.fileData || '').trim(),
+        fileUrl: String(labReport.fileUrl || '').trim(),
+        mimeType: String(labReport.mimeType || '').trim(),
+        notes: String(labReport.notes || '').trim(),
+        uploadedAt: new Date(),
+        uploadedBy: req.user.id
+      });
+    }
+
+    if (hasPrescriptionFile) {
+      appointment.prescriptionFiles.push({
+        title: String(prescriptionFile.title || '').trim(),
+        fileName: String(prescriptionFile.fileName || '').trim(),
+        fileData: String(prescriptionFile.fileData || '').trim(),
+        fileUrl: String(prescriptionFile.fileUrl || '').trim(),
+        mimeType: String(prescriptionFile.mimeType || '').trim(),
+        notes: String(prescriptionFile.notes || '').trim(),
+        uploadedAt: new Date(),
+        uploadedBy: req.user.id
+      });
+    }
+
+    if (['scheduled', 'confirmed'].includes(appointment.status)) {
+      appointment.status = 'in_progress';
+    }
+
+    await appointment.save();
+
+    if (appointment.prescription?.medicines?.length > 0) {
+      try {
+        const pharmacyManager = require('../services/pharmacyManager');
+        await pharmacyManager.createOrderFromPrescription(appointment._id);
+      } catch (error) {
+        console.error('Error creating pharmacy order:', error);
+      }
+    }
+
+    const updatedAppointment = await Appointment.findById(appointment._id)
+      .populate('patientId', 'name email phone age gender address')
+      .populate('doctorId', 'userId specialization consultationFee')
+      .populate({
+        path: 'doctorId',
+        populate: {
+          path: 'userId',
+          select: 'name email phone'
+        }
+      })
+      .populate('labReports.uploadedBy', 'name role')
+      .populate('prescriptionFiles.uploadedBy', 'name role');
+
+    res.status(200).json({
+      success: true,
+      message: 'Prescription details updated successfully',
+      data: updatedAppointment
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const startVideoConsultation = async (req, res, next) => {
   try {
     const appointment = await Appointment.findById(req.params.id)
@@ -753,6 +903,7 @@ module.exports = {
   startVideoConsultation,
   addPrescription,
   addDiagnosis,
+  updateConsultationDetails,
   rateAppointment,
   getAppointmentStats
 };

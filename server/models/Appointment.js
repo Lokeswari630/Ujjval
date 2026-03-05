@@ -125,6 +125,80 @@ const appointmentSchema = new mongoose.Schema({
     type: String,
     maxlength: [500, 'Diagnosis cannot exceed 500 characters']
   },
+  labReports: [{
+    title: {
+      type: String,
+      trim: true,
+      maxlength: [120, 'Lab report title cannot exceed 120 characters']
+    },
+    fileName: {
+      type: String,
+      trim: true,
+      maxlength: [180, 'Lab report file name cannot exceed 180 characters']
+    },
+    fileData: {
+      type: String
+    },
+    fileUrl: {
+      type: String,
+      trim: true
+    },
+    mimeType: {
+      type: String,
+      trim: true,
+      maxlength: [120, 'Lab report mime type cannot exceed 120 characters']
+    },
+    notes: {
+      type: String,
+      trim: true,
+      maxlength: [500, 'Lab report notes cannot exceed 500 characters']
+    },
+    uploadedAt: {
+      type: Date,
+      default: Date.now
+    },
+    uploadedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }
+  }],
+  prescriptionFiles: [{
+    title: {
+      type: String,
+      trim: true,
+      maxlength: [120, 'Prescription title cannot exceed 120 characters']
+    },
+    fileName: {
+      type: String,
+      trim: true,
+      maxlength: [180, 'Prescription file name cannot exceed 180 characters']
+    },
+    fileData: {
+      type: String
+    },
+    fileUrl: {
+      type: String,
+      trim: true
+    },
+    mimeType: {
+      type: String,
+      trim: true,
+      maxlength: [120, 'Prescription mime type cannot exceed 120 characters']
+    },
+    notes: {
+      type: String,
+      trim: true,
+      maxlength: [500, 'Prescription notes cannot exceed 500 characters']
+    },
+    uploadedAt: {
+      type: Date,
+      default: Date.now
+    },
+    uploadedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }
+  }],
   videoCallLink: {
     type: String
   },

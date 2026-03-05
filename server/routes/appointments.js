@@ -11,6 +11,7 @@ const {
   startVideoConsultation,
   addPrescription,
   addDiagnosis,
+  updateConsultationDetails,
   rateAppointment,
   getAppointmentStats
 } = require('../controllers/appointmentsController');
@@ -29,6 +30,7 @@ router.patch('/:id/status', updateAppointmentStatus);
 router.post('/:id/video/start', authorize('doctor'), startVideoConsultation);
 router.post('/:id/prescription', authorize('doctor'), addPrescription);
 router.patch('/:id/diagnosis', authorize('doctor'), addDiagnosis);
+router.patch('/:id/consultation', authorize('doctor'), updateConsultationDetails);
 router.post('/:id/rating', authorize('patient'), rateAppointment);
 
 module.exports = router;

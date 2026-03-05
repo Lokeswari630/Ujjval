@@ -7,6 +7,13 @@
 
 class AIHealthPredictor {
   constructor() {
+    this.externalAi = {
+      url: process.env.HEALTH_AI_API_URL || 'https://api.openai.com/v1/chat/completions',
+      model: process.env.HEALTH_AI_MODEL || 'gpt-4o-mini',
+      apiKey: process.env.HEALTH_AI_API_KEY || process.env.OPENAI_API_KEY || '',
+      timeoutMs: Number(process.env.HEALTH_AI_TIMEOUT_MS || 12000)
+    };
+
     // Symptom-to-condition mapping database
     this.symptomDatabase = {
       // Cardiovascular symptoms
@@ -143,16 +150,17 @@ class AIHealthPredictor {
 
       // Step 2: Calculate combined risk score
       const riskAnalysis = this.calculateCombinedRisk(symptomAnalyses, patientData);
+      const riskLevel = this.getRiskLevel(riskAnalysis.totalScore);
       
       // Step 3: Generate recommendations
-      const recommendations = this.generateRecommendations(riskAnalysis, patientData);
+      const recommendations = await this.generateRecommendations(riskAnalysis, patientData, riskLevel);
       
       // Step 4: Determine urgency and specialization
       const urgencyLevel = this.determineUrgency(riskAnalysis);
       const suggestedSpecialization = this.suggestSpecialization(symptomAnalyses);
 
       return {
-        riskLevel: this.getRiskLevel(riskAnalysis.totalScore),
+        riskLevel,
         riskScore: Math.round(riskAnalysis.totalScore),
         possibleConditions: riskAnalysis.topConditions,
         recommendations,
@@ -353,9 +361,14 @@ class AIHealthPredictor {
   /**
    * Generate recommendations based on analysis
    */
-  generateRecommendations(riskAnalysis, patientData) {
+  async generateRecommendations(riskAnalysis, patientData, riskLevel) {
+    const apiRecommendations = await this.getApiBasedNaturalRecommendations(riskAnalysis, patientData, riskLevel);
+    if (apiRecommendations.length > 0) {
+      return apiRecommendations;
+    }
+
     const recommendations = [];
-    const { riskLevel, topConditions } = riskAnalysis;
+    const { topConditions } = riskAnalysis;
 
     // Basic recommendations for all risk levels
     recommendations.push({
@@ -416,7 +429,148 @@ class AIHealthPredictor {
       }
     }
 
+    const symptomSet = new Set((patientData.symptoms || []).map((item) => String(item || '').toLowerCase()));
+
+    if (symptomSet.has('fever') || symptomSet.has('cough')) {
+      recommendations.push({
+        type: 'Food for recovery: warm soups, dal-rice/khichdi, citrus fruits, and coconut water.',
+        priority: 'low'
+      });
+    } else if (symptomSet.has('abdominal_pain') || symptomSet.has('nausea')) {
+      recommendations.push({
+        type: 'Food for recovery: banana, plain curd, rice porridge, toast, and light homemade meals.',
+        priority: 'low'
+      });
+    } else if (symptomSet.has('headache') || symptomSet.has('fatigue')) {
+      recommendations.push({
+        type: 'Food for recovery: adequate water, seasonal fruits, nuts/seeds, and balanced home-cooked meals.',
+        priority: 'low'
+      });
+    } else {
+      recommendations.push({
+        type: 'Food for recovery: soft, home-cooked meals with vegetables, fruits, and enough fluids.',
+        priority: 'low'
+      });
+    }
+
+    if (String(patientData?.reportContext || '').trim()) {
+      recommendations.push({
+        type: 'Follow report-specific precautions: choose meals and routines based on your known conditions/allergies in report notes.',
+        priority: 'medium'
+      });
+    }
+
     return recommendations;
+  }
+
+  isExternalAIConfigured() {
+    return Boolean(String(this.externalAi.apiKey || '').trim());
+  }
+
+  buildNaturalCarePrompt(riskAnalysis, patientData, riskLevel) {
+    const reportContext = String(patientData?.reportContext || '').trim();
+    const reportUpload = patientData?.reportUpload || {};
+
+    return [
+      'You are a health-support assistant that gives only natural, home-based wellness suggestions.',
+      'Strict rules:',
+      '- Do not prescribe medicines, pills, chemicals, injections, or supplements.',
+      '- Focus on hydration, sleep, food, breathing, light movement, hygiene, and rest-based actions.',
+      '- Include food suggestions for recovery (2 to 4 practical items/meals).',
+      '- Keep advice practical and short for non-doctors.',
+      '- If risk is high/urgent or critical symptoms exist, include immediate doctor/emergency escalation.',
+      '- Output JSON only with this schema:',
+      '{"recommendations":[{"type":"string","priority":"low|medium|high"}]}.',
+      `Risk Level: ${riskLevel}`,
+      `Top Conditions: ${(riskAnalysis.topConditions || []).map((item) => item.condition).join(', ') || 'Unknown'}`,
+      `Symptoms: ${(patientData.symptoms || []).join(', ')}`,
+      `Age: ${patientData.age}, Gender: ${patientData.gender}`,
+      `Lifestyle: ${JSON.stringify(patientData.lifestyleFactors || {})}`,
+      `Vitals: ${JSON.stringify(patientData.vitalSigns || {})}`,
+      `Report Notes: ${reportContext || 'Not provided'}`,
+      `Report Upload: ${reportUpload.fileName ? `${reportUpload.fileName} (${reportUpload.fileType || 'unknown'})` : 'Not provided'}`
+    ].join('\n');
+  }
+
+  sanitizeRecommendations(payloadRecommendations = []) {
+    if (!Array.isArray(payloadRecommendations)) return [];
+
+    const blockedTerms = [
+      'tablet', 'capsule', 'medicine', 'medication', 'antibiotic', 'drug', 'chemical',
+      'injection', 'steroid', 'painkiller', 'syrup', 'dose', 'pharma'
+    ];
+
+    return payloadRecommendations
+      .map((item) => ({
+        type: String(item?.type || '').trim(),
+        priority: ['low', 'medium', 'high'].includes(String(item?.priority || '').toLowerCase())
+          ? String(item.priority).toLowerCase()
+          : 'medium'
+      }))
+      .filter((item) => item.type.length > 0)
+      .filter((item) => {
+        const normalized = item.type.toLowerCase();
+        return !blockedTerms.some((term) => normalized.includes(term));
+      })
+      .slice(0, 8);
+  }
+
+  async getApiBasedNaturalRecommendations(riskAnalysis, patientData, riskLevel) {
+    if (!this.isExternalAIConfigured()) {
+      return [];
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.externalAi.timeoutMs);
+
+    try {
+      const response = await fetch(this.externalAi.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.externalAi.apiKey}`
+        },
+        body: JSON.stringify({
+          model: this.externalAi.model,
+          temperature: 0.2,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: 'You provide safe, conservative, natural home-care advice only.'
+            },
+            {
+              role: 'user',
+              content: this.buildNaturalCarePrompt(riskAnalysis, patientData, riskLevel)
+            }
+          ]
+        }),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        return [];
+      }
+
+      const data = await response.json();
+      const content = data?.choices?.[0]?.message?.content;
+      if (!content) {
+        return [];
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(content);
+      } catch (error) {
+        return [];
+      }
+
+      return this.sanitizeRecommendations(parsed?.recommendations);
+    } catch (error) {
+      return [];
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   /**

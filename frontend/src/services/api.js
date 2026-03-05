@@ -306,6 +306,8 @@ export const appointmentsAPI = {
   updateStatus: (id, status) => API.patch(`/appointments/${id}/status`, { status }),
   startVideoConsultation: (id) => API.post(`/appointments/${id}/video/start`),
   addPrescription: (id, prescriptionData) => API.post(`/appointments/${id}/prescription`, prescriptionData),
+  addDiagnosis: (id, diagnosisData) => API.patch(`/appointments/${id}/diagnosis`, diagnosisData),
+  updateConsultation: (id, consultationData) => API.patch(`/appointments/${id}/consultation`, consultationData),
   getStats: () => API.get('/appointments/stats/overview'),
 };
 
@@ -429,7 +431,8 @@ export const doctorsAPI = {
 
 export const emergencyTicketsAPI = {
   create: (payload) => API.post('/emergency-tickets', payload),
-  getDoctorFeed: () => API.get('/emergency-tickets/doctor-feed')
+  getDoctorFeed: () => API.get('/emergency-tickets/doctor-feed'),
+  updateStatus: (id, status) => API.patch(`/emergency-tickets/${id}/status`, { status })
 };
 
 // Users API

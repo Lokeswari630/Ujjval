@@ -1,9 +1,27 @@
 @import "tailwindcss";
 
 @layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
   body {
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
   }
+}
+
+.hospital-bg-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: url('/hospital-background.svg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0.16;
+  z-index: 0;
 }
 
 @layer components {

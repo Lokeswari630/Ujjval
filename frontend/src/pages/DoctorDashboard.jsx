@@ -17,6 +17,20 @@ const DoctorDashboard = () => {
   });
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [emergencyActionLoading, setEmergencyActionLoading] = useState({});
+  const [expandedEmergencyTicket, setExpandedEmergencyTicket] = useState('');
+  const [statsTrackIndex, setStatsTrackIndex] = useState(0);
+  const [statsTrackAnimating, setStatsTrackAnimating] = useState(true);
+  const [prescriptionUploadForm, setPrescriptionUploadForm] = useState({
+    appointmentId: '',
+    title: '',
+    fileData: '',
+    fileName: '',
+    fileType: ''
+  });
+  const [prescriptionUploading, setPrescriptionUploading] = useState(false);
+  const [prescriptionUploadError, setPrescriptionUploadError] = useState('');
+  const [prescriptionUploadMessage, setPrescriptionUploadMessage] = useState('');
 
   useEffect(() => {
     loadData();
@@ -119,6 +133,84 @@ const DoctorDashboard = () => {
     ? Math.round((completedAppointments / data.appointments.length) * 100)
     : 0;
 
+  const statsSlides = [
+    {
+      title: 'Total Appointments',
+      value: data.appointments.length,
+      color: 'bg-blue-500',
+      Icon: Calendar
+    },
+    {
+      title: 'Total Patients',
+      value: uniquePatients,
+      color: 'bg-green-500',
+      Icon: Users
+    },
+    {
+      title: 'Avg. Consultation',
+      value: `${averageConsultationMinutes} min`,
+      color: 'bg-purple-500',
+      Icon: Clock
+    },
+    {
+      title: 'Success Rate',
+      value: `${successRate}%`,
+      color: 'bg-orange-500',
+      Icon: TrendingUp
+    },
+    {
+      title: 'Pending Acceptance',
+      value: pendingAcceptanceCount,
+      color: 'bg-amber-500',
+      Icon: BadgeIndianRupee
+    }
+  ];
+
+  const statsSlidesExtended = [...statsSlides, statsSlides[0]];
+  const currentStatsDisplayIndex = statsTrackIndex >= statsSlides.length ? 0 : statsTrackIndex;
+
+  useEffect(() => {
+    if (activeTab !== 'overview') return undefined;
+
+    const intervalId = setInterval(() => {
+      setStatsTrackAnimating(true);
+      setStatsTrackIndex((prev) => (prev >= statsSlides.length ? 1 : prev + 1));
+    }, 2000);
+
+    return () => clearInterval(intervalId);
+  }, [activeTab, statsSlides.length]);
+
+  useEffect(() => {
+    if (!statsTrackAnimating) return undefined;
+    if (statsTrackIndex !== statsSlides.length) return undefined;
+
+    const resetTimer = setTimeout(() => {
+      setStatsTrackAnimating(false);
+      setStatsTrackIndex(0);
+      setTimeout(() => {
+        setStatsTrackAnimating(true);
+      }, 20);
+    }, 720);
+
+    return () => clearTimeout(resetTimer);
+  }, [statsTrackIndex, statsSlides.length, statsTrackAnimating]);
+  const goToNextStatsSlide = () => {
+    setStatsTrackAnimating(true);
+    setStatsTrackIndex((prev) => (prev >= statsSlides.length ? 1 : prev + 1));
+  };
+
+  const goToPreviousStatsSlide = () => {
+    setStatsTrackAnimating(true);
+    setStatsTrackIndex((prev) => {
+      if (prev === 0) {
+        return statsSlides.length - 1;
+      }
+      return prev - 1;
+    });
+  };
+
+  const handleStatsTrackTransitionEnd = () => {};
+
   const quickActions = [
     {
       title: 'View Appointments',
@@ -161,6 +253,160 @@ const DoctorDashboard = () => {
       setActionLoading(false);
     }
   };
+
+  const handleEmergencyTicketAction = async (ticketId, nextStatus) => {
+    try {
+      setEmergencyActionLoading((prev) => ({ ...prev, [ticketId]: true }));
+      await emergencyTicketsAPI.updateStatus(ticketId, nextStatus);
+      await loadData();
+    } catch (error) {
+      console.error('Failed to update emergency ticket status:', error);
+    } finally {
+      setEmergencyActionLoading((prev) => ({ ...prev, [ticketId]: false }));
+    }
+  };
+
+  const onPrescriptionFileChange = (event) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      setPrescriptionUploadForm((prev) => ({
+        ...prev,
+        fileData: '',
+        fileName: '',
+        fileType: ''
+      }));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPrescriptionUploadForm((prev) => ({
+        ...prev,
+        fileData: typeof reader.result === 'string' ? reader.result : '',
+        fileName: file.name,
+        fileType: file.type || ''
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const submitPrescriptionUpload = async (event) => {
+    event.preventDefault();
+    setPrescriptionUploadError('');
+    setPrescriptionUploadMessage('');
+
+    if (!prescriptionUploadForm.appointmentId) {
+      setPrescriptionUploadError('Select an appointment before uploading prescription.');
+      return;
+    }
+
+    if (!prescriptionUploadForm.fileData) {
+      setPrescriptionUploadError('Select a prescription file to upload.');
+      return;
+    }
+
+    try {
+      setPrescriptionUploading(true);
+      await appointmentsAPI.updateConsultation(prescriptionUploadForm.appointmentId, {
+        prescriptionFile: {
+          title: prescriptionUploadForm.title.trim(),
+          fileName: prescriptionUploadForm.fileName,
+          fileData: prescriptionUploadForm.fileData,
+          mimeType: prescriptionUploadForm.fileType
+        }
+      });
+
+      setPrescriptionUploadMessage('Prescription uploaded successfully.');
+      setPrescriptionUploadForm({
+        appointmentId: '',
+        title: '',
+        fileData: '',
+        fileName: '',
+        fileType: ''
+      });
+      await loadData();
+    } catch (error) {
+      setPrescriptionUploadError(error?.message || 'Failed to upload prescription');
+    } finally {
+      setPrescriptionUploading(false);
+    }
+  };
+
+  const prescriptionUploadAppointments = data.appointments.filter((appointment) => (
+    ['confirmed', 'in_progress', 'completed', 'scheduled'].includes(appointment.status)
+  ));
+
+  const renderPrescriptionUpload = () => (
+    <div className="max-w-3xl">
+      <div className="bg-white rounded-lg shadow p-6">
+        <h3 className="text-lg font-semibold text-gray-900">Upload Prescription</h3>
+        <p className="mt-1 text-sm text-gray-600">Upload a prescription file just like lab report uploads.</p>
+
+        {prescriptionUploadError && (
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {prescriptionUploadError}
+          </div>
+        )}
+
+        {prescriptionUploadMessage && (
+          <div className="mt-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+            {prescriptionUploadMessage}
+          </div>
+        )}
+
+        <form onSubmit={submitPrescriptionUpload} className="mt-4 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Appointment</label>
+            <select
+              value={prescriptionUploadForm.appointmentId}
+              onChange={(event) => setPrescriptionUploadForm((prev) => ({ ...prev, appointmentId: event.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            >
+              <option value="">Select appointment</option>
+              {prescriptionUploadAppointments.map((appointment) => (
+                <option key={appointment._id} value={appointment._id}>
+                  {appointment?.patientId?.name || 'Patient'} • {new Date(appointment.date).toLocaleDateString()} • {appointment.startTime}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Prescription Title (optional)</label>
+            <input
+              type="text"
+              value={prescriptionUploadForm.title}
+              onChange={(event) => setPrescriptionUploadForm((prev) => ({ ...prev, title: event.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Post-consultation prescription"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Upload Prescription</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={onPrescriptionFileChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              required
+            />
+            {prescriptionUploadForm.fileName && (
+              <p className="mt-1 text-xs text-gray-600">Selected: {prescriptionUploadForm.fileName}</p>
+            )}
+          </div>
+
+          <div className="flex justify-end">
+            <Button type="submit" disabled={prescriptionUploading}>
+              {prescriptionUploading ? 'Uploading...' : 'Upload Prescription'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 
   const renderPaymentRequests = () => (
     <div className="space-y-4">
@@ -220,6 +466,96 @@ const DoctorDashboard = () => {
     </div>
   );
 
+  const renderEmergencyRequests = () => (
+    <div className="space-y-4">
+      {data.emergencyTickets.length === 0 ? (
+        <div className="bg-white rounded-lg shadow p-6 text-sm text-gray-600">No active emergency requests.</div>
+      ) : (
+        data.emergencyTickets.map((ticket) => (
+          <div
+            key={ticket._id}
+            className={`bg-white rounded-lg shadow p-5 border ${
+              ticket.isHighlighted ? 'border-red-300' : 'border-gray-200'
+            }`}
+          >
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-semibold text-gray-900">{ticket?.patient?.name || 'Patient'}</p>
+                <p className="text-sm text-gray-600">
+                  {ticket?.hospital || 'Hospital'} • {new Date(ticket.createdAt).toLocaleString()}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
+                  ticket.status === 'acknowledged'
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-red-100 text-red-800'
+                }`}>
+                  {ticket.status}
+                </span>
+                {ticket.isHighlighted && (
+                  <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-red-600 text-white">
+                    Related Patient
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <p className="mt-3 text-sm text-gray-800">
+              <span className="font-medium capitalize">{ticket.incidentType}</span>: {ticket.description}
+            </p>
+            <p className="mt-1 text-xs text-gray-600">
+              Symptoms: {Array.isArray(ticket?.symptoms) && ticket.symptoms.length > 0 ? ticket.symptoms.join(', ') : 'Not provided'}
+            </p>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setExpandedEmergencyTicket((prev) => (prev === ticket._id ? '' : ticket._id))}
+              >
+                {expandedEmergencyTicket === ticket._id ? 'Hide Details' : 'View Details'}
+              </Button>
+              {ticket.status === 'open' && (
+                <Button
+                  size="sm"
+                  variant="success"
+                  disabled={!!emergencyActionLoading[ticket._id]}
+                  onClick={() => handleEmergencyTicketAction(ticket._id, 'acknowledged')}
+                >
+                  {emergencyActionLoading[ticket._id] ? 'Updating...' : 'Acknowledge'}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={!!emergencyActionLoading[ticket._id]}
+                onClick={() => handleEmergencyTicketAction(ticket._id, 'resolved')}
+              >
+                {emergencyActionLoading[ticket._id] ? 'Updating...' : 'Resolve'}
+              </Button>
+            </div>
+
+            {expandedEmergencyTicket === ticket._id && (
+              <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 space-y-2">
+                <p><span className="font-medium">Patient:</span> {ticket?.patient?.name || 'Patient'}</p>
+                <p><span className="font-medium">Phone:</span> {ticket?.patient?.phone || 'N/A'}</p>
+                <p><span className="font-medium">Age/Gender:</span> {ticket?.patient?.age || 'N/A'} / {ticket?.patient?.gender || 'N/A'}</p>
+                <p><span className="font-medium">Notified Doctors:</span> {ticket?.totalNotifiedDoctors || 0}</p>
+                {ticket.primaryDoctors?.length > 0 && (
+                  <p>
+                    <span className="font-medium">Priority Doctors:</span>{' '}
+                    {ticket.primaryDoctors.map((doctor) => doctor.doctorName).join(', ')}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        ))
+      )}
+    </div>
+  );
+
   const renderOverview = () => (
     <div className="space-y-6">
       <div className="bg-white rounded-lg shadow p-5">
@@ -233,12 +569,12 @@ const DoctorDashboard = () => {
         {data.emergencyTickets.length === 0 ? (
           <p className="text-sm text-gray-600">No active emergency tickets for your hospital.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <div className="flex gap-3 min-w-max pb-1">
+          <div>
+            <div className="space-y-3">
               {data.emergencyTickets.map((ticket) => (
                 <div
                   key={ticket._id}
-                  className={`w-80 rounded-lg border p-4 ${
+                  className={`w-full rounded-lg border p-4 ${
                     ticket.isHighlighted
                       ? 'border-red-300 bg-red-50'
                       : 'border-gray-200 bg-gray-50'
@@ -267,74 +603,54 @@ const DoctorDashboard = () => {
                       Priority doctors: {ticket.primaryDoctors.slice(0, 2).map((doctor) => doctor.doctorName).join(', ')}
                     </p>
                   )}
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setExpandedEmergencyTicket((prev) => (prev === ticket._id ? '' : ticket._id))}
+                    >
+                      {expandedEmergencyTicket === ticket._id ? 'Hide Details' : 'View Details'}
+                    </Button>
+                    {ticket.status === 'open' && (
+                      <Button
+                        size="sm"
+                        variant="success"
+                        disabled={!!emergencyActionLoading[ticket._id]}
+                        onClick={() => handleEmergencyTicketAction(ticket._id, 'acknowledged')}
+                      >
+                        {emergencyActionLoading[ticket._id] ? 'Updating...' : 'Acknowledge'}
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={!!emergencyActionLoading[ticket._id]}
+                      onClick={() => handleEmergencyTicketAction(ticket._id, 'resolved')}
+                    >
+                      {emergencyActionLoading[ticket._id] ? 'Updating...' : 'Resolve'}
+                    </Button>
+                  </div>
+
+                  {expandedEmergencyTicket === ticket._id && (
+                    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-700 space-y-2">
+                      <p><span className="font-medium">Patient:</span> {ticket?.patient?.name || 'Patient'}</p>
+                      <p><span className="font-medium">Phone:</span> {ticket?.patient?.phone || 'N/A'}</p>
+                      <p><span className="font-medium">Hospital:</span> {ticket?.hospital || 'N/A'}</p>
+                      <p><span className="font-medium">Current Status:</span> {ticket?.status || 'open'}</p>
+                      <p>
+                        <span className="font-medium">Symptoms:</span>{' '}
+                        {Array.isArray(ticket?.symptoms) && ticket.symptoms.length > 0
+                          ? ticket.symptoms.join(', ')
+                          : 'Not provided'}
+                      </p>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           </div>
         )}
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center">
-            <div className="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center text-white">
-              <Calendar className="w-6 h-6" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm text-gray-600">Total Appointments</p>
-              <p className="text-2xl font-bold text-gray-900">{data.appointments.length}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center">
-            <div className="w-12 h-12 bg-green-500 rounded-lg flex items-center justify-center text-white">
-              <Users className="w-6 h-6" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm text-gray-600">Total Patients</p>
-              <p className="text-2xl font-bold text-gray-900">{uniquePatients}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center">
-            <div className="w-12 h-12 bg-purple-500 rounded-lg flex items-center justify-center text-white">
-              <Clock className="w-6 h-6" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm text-gray-600">Avg. Consultation</p>
-              <p className="text-2xl font-bold text-gray-900">{averageConsultationMinutes} min</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center">
-            <div className="w-12 h-12 bg-orange-500 rounded-lg flex items-center justify-center text-white">
-              <TrendingUp className="w-6 h-6" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm text-gray-600">Success Rate</p>
-              <p className="text-2xl font-bold text-gray-900">{successRate}%</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center">
-            <div className="w-12 h-12 bg-amber-500 rounded-lg flex items-center justify-center text-white">
-              <BadgeIndianRupee className="w-6 h-6" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm text-gray-600">Pending Acceptance</p>
-              <p className="text-2xl font-bold text-gray-900">{pendingAcceptanceCount}</p>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Quick Actions */}
@@ -358,6 +674,52 @@ const DoctorDashboard = () => {
               </div>
             </Link>
           ))}
+        </div>
+      </div>
+
+      {/* Stats Slider */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">Doctor Metrics</h3>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={goToPreviousStatsSlide}
+            >
+              ←
+            </Button>
+            <span className="text-xs text-gray-600">{currentStatsDisplayIndex + 1}/{statsSlides.length}</span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={goToNextStatsSlide}
+            >
+              →
+            </Button>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-gray-100 overflow-hidden">
+          <div
+            className={`flex ${statsTrackAnimating ? 'transition-transform duration-700 ease-in-out' : ''}`}
+            style={{ transform: `translateX(-${statsTrackIndex * 100}%)` }}
+            onTransitionEnd={handleStatsTrackTransitionEnd}
+          >
+            {statsSlidesExtended.map((slide, index) => (
+              <div key={`${slide.title}-${index}`} className="w-full shrink-0 p-6 flex items-center justify-center min-h-37.5">
+                <div className="flex flex-col lg:flex-row items-center lg:items-center text-center lg:text-left gap-3 lg:gap-6 lg:w-full lg:max-w-2xl lg:justify-center">
+                  <div className={`w-12 h-12 ${slide.color} rounded-lg flex items-center justify-center text-white`}>
+                    <slide.Icon className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="text-sm lg:text-base text-gray-600">{slide.title}</p>
+                    <p className="text-2xl lg:text-3xl font-bold text-gray-900">{slide.value}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -450,7 +812,9 @@ const DoctorDashboard = () => {
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: <Activity className="w-4 h-4" /> },
+    { id: 'emergency-requests', label: 'Emergency Requests', icon: <AlertTriangle className="w-4 h-4" /> },
     { id: 'payment-requests', label: 'Payment Requests', icon: <BadgeIndianRupee className="w-4 h-4" /> },
+    { id: 'prescription-upload', label: 'Prescription Upload', icon: <FileText className="w-4 h-4" /> },
     { id: 'analytics', label: 'Analytics', icon: <TrendingUp className="w-4 h-4" /> }
   ];
 
@@ -529,7 +893,9 @@ const DoctorDashboard = () => {
         ) : (
           <>
             {activeTab === 'overview' && renderOverview()}
+            {activeTab === 'emergency-requests' && renderEmergencyRequests()}
             {activeTab === 'payment-requests' && renderPaymentRequests()}
+            {activeTab === 'prescription-upload' && renderPrescriptionUpload()}
             {activeTab === 'analytics' && renderAnalytics()}
           </>
         )}
