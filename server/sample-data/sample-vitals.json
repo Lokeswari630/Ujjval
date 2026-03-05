@@ -1,0 +1,16 @@
+[
+  {
+    "patientEmail": "patient@example.com",
+    "bloodPressure": { "systolic": 138, "diastolic": 88 },
+    "bloodSugar": 154,
+    "heartRate": 92,
+    "recordedAt": "2026-03-01T08:30:00.000Z"
+  },
+  {
+    "patientEmail": "patient@example.com",
+    "bloodPressure": { "systolic": 146, "diastolic": 95 },
+    "bloodSugar": 188,
+    "heartRate": 108,
+    "recordedAt": "2026-03-02T08:30:00.000Z"
+  }
+]

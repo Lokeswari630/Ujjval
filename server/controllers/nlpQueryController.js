@@ -1,0 +1,440 @@
+const Appointment = require('../models/Appointment');
+const Doctor = require('../models/Doctor');
+const HealthPrediction = require('../models/HealthPrediction');
+const MedicineInventory = require('../models/MedicineInventory');
+const NLPQueryHistory = require('../models/NLPQueryHistory');
+const User = require('../models/User');
+
+const roleSuggestions = {
+  patient: [
+    'Go to my appointments page',
+    'Open my profile page',
+    'Show my upcoming appointments'
+  ],
+  doctor: [
+    'Open patient records page',
+    'Open health predictions page',
+    "Show today's appointments"
+  ],
+  admin: [
+    'Go to dashboard page',
+    'Open admin profile page',
+    'Check low stock medicines'
+  ],
+  pharmacist: [
+    'Open inventory page',
+    'Open pharmacy page',
+    'Check low stock medicines'
+  ]
+};
+
+const getSuggestionsForRole = (role) => roleSuggestions[role] || roleSuggestions.patient;
+
+const parseIntent = (rawQuery) => {
+  const query = String(rawQuery || '').trim().toLowerCase();
+
+  const has = (terms) => terms.some((term) => query.includes(term));
+
+  if (has(['go to', 'open', 'navigate', 'take me', 'dashboard', 'profile page', 'appointments page'])) {
+    return {
+      intent: 'navigation.route',
+      confidence: 0.9,
+      entities: {}
+    };
+  }
+
+  if (has(['upcoming appointment', 'my appointment', "today's appointment", 'appointments'])) {
+    return {
+      intent: 'appointments.lookup',
+      confidence: 0.86,
+      entities: {
+        scope: has(['upcoming']) ? 'upcoming' : has(["today", "today's"]) ? 'today' : 'all'
+      }
+    };
+  }
+
+  if (has(['list all patients', 'all patients', 'patients list'])) {
+    return {
+      intent: 'users.listPatients',
+      confidence: 0.91,
+      entities: {}
+    };
+  }
+
+  if (has(['low stock', 'inventory low', 'check low stock', 'stock medicines', 'low medicines'])) {
+    return {
+      intent: 'inventory.lowStock',
+      confidence: 0.89,
+      entities: {}
+    };
+  }
+
+  if (has(["today's prescriptions", 'prescriptions today', 'today prescriptions'])) {
+    return {
+      intent: 'prescriptions.today',
+      confidence: 0.84,
+      entities: {}
+    };
+  }
+
+  if (has(['last health prediction', 'my last prediction', 'latest prediction'])) {
+    return {
+      intent: 'predictions.latest',
+      confidence: 0.9,
+      entities: {}
+    };
+  }
+
+  return {
+    intent: 'unknown',
+    confidence: 0.35,
+    entities: {}
+  };
+};
+
+const getTodayRange = () => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+};
+
+const getAppointmentsForUser = async (user, scope) => {
+  const filter = { status: { $ne: 'cancelled' } };
+  const now = new Date();
+  const { start, end } = getTodayRange();
+
+  if (user.role === 'patient') {
+    filter.patientId = user.id;
+  } else if (user.role === 'doctor') {
+    const doctor = await Doctor.findOne({ userId: user.id }).select('_id');
+    if (!doctor) {
+      return { rows: [], message: 'Doctor profile not found' };
+    }
+    filter.doctorId = doctor._id;
+  }
+
+  if (scope === 'upcoming') {
+    filter.date = { $gte: now };
+  }
+
+  if (scope === 'today') {
+    filter.date = { $gte: start, $lte: end };
+  }
+
+  const rows = await Appointment.find(filter)
+    .populate('patientId', 'name email')
+    .populate({
+      path: 'doctorId',
+      populate: { path: 'userId', select: 'name email' },
+      select: 'userId specialization'
+    })
+    .sort({ date: 1, startTime: 1 })
+    .limit(20);
+
+  return { rows, message: 'Appointments fetched successfully' };
+};
+
+const executeIntent = async (parsed, user) => {
+  const { intent, entities } = parsed;
+
+  if (intent === 'navigation.route') {
+    return {
+      message: 'Navigation request detected',
+      resultType: 'navigation',
+      data: [],
+      columns: []
+    };
+  }
+
+  if (intent === 'appointments.lookup') {
+    const result = await getAppointmentsForUser(user, entities.scope);
+    return {
+      message: result.message,
+      resultType: 'appointments',
+      data: result.rows,
+      columns: ['date', 'startTime', 'status', 'patient', 'doctor']
+    };
+  }
+
+  if (intent === 'users.listPatients') {
+    if (!['admin', 'doctor'].includes(user.role)) {
+      throw Object.assign(new Error('Access denied for patient listing'), { statusCode: 403 });
+    }
+
+    let patients = [];
+
+    if (user.role === 'admin') {
+      patients = await User.find({ role: 'patient', isActive: true })
+        .select('name email phone age gender createdAt')
+        .sort({ createdAt: -1 })
+        .limit(50);
+    } else {
+      const doctor = await Doctor.findOne({ userId: user.id }).select('_id');
+      if (doctor) {
+        const appointmentRows = await Appointment.find({ doctorId: doctor._id })
+          .distinct('patientId');
+        patients = await User.find({ _id: { $in: appointmentRows }, role: 'patient' })
+          .select('name email phone age gender')
+          .sort({ name: 1 });
+      }
+    }
+
+    return {
+      message: 'Patients fetched successfully',
+      resultType: 'patients',
+      data: patients,
+      columns: ['name', 'email', 'phone', 'age', 'gender']
+    };
+  }
+
+  if (intent === 'inventory.lowStock') {
+    if (!['admin', 'pharmacist'].includes(user.role)) {
+      throw Object.assign(new Error('Access denied for inventory data'), { statusCode: 403 });
+    }
+
+    const expiringThreshold = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const rows = await MedicineInventory.find({
+      isActive: true,
+      $or: [
+        { $expr: { $lte: ['$stock', '$minStockLevel'] } },
+        { expiryDate: { $lte: expiringThreshold } }
+      ]
+    })
+      .select('name brand stock minStockLevel expiryDate category')
+      .sort({ stock: 1 })
+      .limit(50);
+
+    return {
+      message: 'Low stock medicines fetched successfully',
+      resultType: 'inventory',
+      data: rows,
+      columns: ['name', 'brand', 'stock', 'minStockLevel', 'expiryDate']
+    };
+  }
+
+  if (intent === 'prescriptions.today') {
+    const { start, end } = getTodayRange();
+    const filter = {
+      'prescription.issuedAt': { $gte: start, $lte: end }
+    };
+
+    if (user.role === 'patient') {
+      filter.patientId = user.id;
+    } else if (user.role === 'doctor') {
+      const doctor = await Doctor.findOne({ userId: user.id }).select('_id');
+      if (!doctor) {
+        return {
+          message: 'Doctor profile not found',
+          resultType: 'prescriptions',
+          data: [],
+          columns: ['issuedAt', 'patient', 'doctor', 'medicinesCount']
+        };
+      }
+      filter.doctorId = doctor._id;
+    }
+
+    const rows = await Appointment.find(filter)
+      .populate('patientId', 'name')
+      .populate({ path: 'doctorId', populate: { path: 'userId', select: 'name' }, select: 'userId' })
+      .select('prescription date startTime patientId doctorId')
+      .sort({ 'prescription.issuedAt': -1 })
+      .limit(30);
+
+    return {
+      message: 'Today\'s prescriptions fetched successfully',
+      resultType: 'prescriptions',
+      data: rows,
+      columns: ['issuedAt', 'patient', 'doctor', 'medicinesCount']
+    };
+  }
+
+  if (intent === 'predictions.latest') {
+    if (user.role !== 'patient') {
+      throw Object.assign(new Error('Only patients can query personal health predictions'), { statusCode: 403 });
+    }
+
+    const row = await HealthPrediction.findOne({ patientId: user.id })
+      .sort({ predictionDate: -1 })
+      .select('predictionDate aiAnalysis symptoms');
+
+    return {
+      message: row ? 'Latest prediction fetched successfully' : 'No predictions found',
+      resultType: 'prediction',
+      data: row ? [row] : [],
+      columns: ['predictionDate', 'riskLevel', 'riskScore', 'symptoms']
+    };
+  }
+
+  return {
+    message: 'Intent not supported',
+    resultType: 'unknown',
+    data: [],
+    columns: []
+  };
+};
+
+const persistHistory = async ({ user, query, parsed, success, message, latencyMs }) => {
+  return NLPQueryHistory.create({
+    userId: user.id,
+    role: user.role,
+    query,
+    intent: parsed.intent,
+    entities: parsed.entities,
+    success,
+    message,
+    latencyMs
+  });
+};
+
+const processNlpQuery = async (req, res, next) => {
+  const startedAt = Date.now();
+
+  try {
+    const query = String(req.body?.query || '').trim();
+
+    if (!query) {
+      return res.status(400).json({
+        success: false,
+        message: 'Query is required',
+        data: null
+      });
+    }
+
+    const parsed = parseIntent(query);
+
+    if (parsed.intent === 'unknown') {
+      const history = await persistHistory({
+        user: req.user,
+        query,
+        parsed,
+        success: false,
+        message: 'Could not map query intent',
+        latencyMs: Date.now() - startedAt
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Query processed with low confidence',
+        data: {
+          intent: parsed.intent,
+          confidence: parsed.confidence,
+          entities: parsed.entities,
+          resultType: 'unknown',
+          result: [],
+          columns: [],
+          suggestions: getSuggestionsForRole(req.user.role),
+          historyId: history._id
+        }
+      });
+    }
+
+    const execution = await executeIntent(parsed, req.user);
+    const history = await persistHistory({
+      user: req.user,
+      query,
+      parsed,
+      success: true,
+      message: execution.message,
+      latencyMs: Date.now() - startedAt
+    });
+
+    res.status(200).json({
+      success: true,
+      message: execution.message,
+      data: {
+        query,
+        intent: parsed.intent,
+        confidence: parsed.confidence,
+        entities: parsed.entities,
+        resultType: execution.resultType,
+        result: execution.data,
+        columns: execution.columns,
+        suggestions: getSuggestionsForRole(req.user.role),
+        historyId: history._id
+      }
+    });
+  } catch (error) {
+    const parsed = parseIntent(req.body?.query || '');
+    await persistHistory({
+      user: req.user,
+      query: String(req.body?.query || ''),
+      parsed,
+      success: false,
+      message: error.message || 'Query processing failed',
+      latencyMs: Date.now() - startedAt
+    }).catch(() => null);
+
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({
+      success: false,
+      message: error.message || 'Failed to process NLP query',
+      data: null
+    });
+  }
+};
+
+const getQueryHistory = async (req, res, next) => {
+  try {
+    const limit = Number(req.query.limit) > 0 ? Math.min(Number(req.query.limit), 50) : 20;
+
+    const rows = await NLPQueryHistory.find({ userId: req.user.id })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .select('query intent entities success message latencyMs createdAt');
+
+    res.status(200).json({
+      success: true,
+      message: 'Query history fetched successfully',
+      data: rows
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getQuerySuggestions = async (req, res, next) => {
+  try {
+    res.status(200).json({
+      success: true,
+      message: 'Suggestions fetched successfully',
+      data: getSuggestionsForRole(req.user.role)
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getQueryStats = async (req, res, next) => {
+  try {
+    const totalQueries = await NLPQueryHistory.countDocuments();
+    const successfulQueries = await NLPQueryHistory.countDocuments({ success: true });
+    const byIntent = await NLPQueryHistory.aggregate([
+      { $group: { _id: '$intent', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 10 }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      message: 'NLP query stats fetched successfully',
+      data: {
+        totalQueries,
+        successfulQueries,
+        failedQueries: Math.max(totalQueries - successfulQueries, 0),
+        successRate: totalQueries ? Number(((successfulQueries / totalQueries) * 100).toFixed(2)) : 0,
+        topIntents: byIntent
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = {
+  processNlpQuery,
+  getQueryHistory,
+  getQuerySuggestions,
+  getQueryStats
+};

@@ -1,0 +1,38 @@
+[
+  {
+    "name": "John Doe",
+    "email": "patient@example.com",
+    "password": "Password123",
+    "role": "patient",
+    "phone": "1234567890",
+    "age": 30,
+    "gender": "male"
+  },
+  {
+    "name": "Dr. Sarah Smith",
+    "email": "doctor@example.com",
+    "password": "Password123",
+    "role": "doctor",
+    "phone": "1234567891",
+    "age": 42,
+    "gender": "female"
+  },
+  {
+    "name": "Pharmacist Mike",
+    "email": "pharmacist@example.com",
+    "password": "Password123",
+    "role": "pharmacist",
+    "phone": "1234567892",
+    "age": 37,
+    "gender": "male"
+  },
+  {
+    "name": "Admin User",
+    "email": "admin@example.com",
+    "password": "Password123",
+    "role": "admin",
+    "phone": "1234567893",
+    "age": 45,
+    "gender": "other"
+  }
+]

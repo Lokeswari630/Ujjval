@@ -1,0 +1,661 @@
+const Appointment = require('../models/Appointment');
+const Doctor = require('../models/Doctor');
+
+const getAppointments = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const startIndex = (page - 1) * limit;
+
+    let query = {};
+
+    if (req.user.role === 'patient') {
+      query.patientId = req.user.id;
+    } else if (req.user.role === 'doctor') {
+      const doctor = await Doctor.findOne({ userId: req.user.id });
+      if (doctor) {
+        query.doctorId = doctor._id;
+      }
+    }
+
+    if (req.query.status) {
+      query.status = req.query.status;
+    }
+
+    if (req.query.priority) {
+      query.priority = req.query.priority;
+    }
+
+    if (req.query.dateFrom) {
+      query.date = { ...query.date, $gte: new Date(req.query.dateFrom) };
+    }
+
+    if (req.query.dateTo) {
+      query.date = { ...query.date, $lte: new Date(req.query.dateTo) };
+    }
+
+    const appointments = await Appointment.find(query)
+      .populate('patientId', 'name email phone age gender')
+      .populate('doctorId', 'userId specialization consultationFee')
+      .populate({
+        path: 'doctorId',
+        populate: {
+          path: 'userId',
+          select: 'name email phone'
+        }
+      })
+      .sort({ date: 1, startTime: 1 })
+      .skip(startIndex)
+      .limit(limit);
+
+    const total = await Appointment.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      data: appointments,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getAppointmentById = async (req, res, next) => {
+  try {
+    const appointment = await Appointment.findById(req.params.id)
+      .populate('patientId', 'name email phone age gender address')
+      .populate('doctorId', 'userId specialization consultationFee')
+      .populate({
+        path: 'doctorId',
+        populate: {
+          path: 'userId',
+          select: 'name email phone'
+        }
+      });
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+
+    if (req.user.role === 'patient' && appointment.patientId._id.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
+      });
+    }
+
+    if (req.user.role === 'doctor') {
+      const doctor = await Doctor.findOne({ userId: req.user.id });
+      if (!doctor || appointment.doctorId._id.toString() !== doctor._id.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: appointment
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const bookAppointment = async (req, res, next) => {
+  try {
+    const { doctorId, date, startTime, endTime, type, symptoms, description } = req.body;
+
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Doctor not found'
+      });
+    }
+
+    const appointmentDate = new Date(date);
+    if (!doctor.isAvailable(appointmentDate, startTime)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Doctor is not available at the requested time'
+      });
+    }
+
+    const conflictingAppointment = await Appointment.findOne({
+      doctorId,
+      date: appointmentDate,
+      startTime,
+      status: { $in: ['scheduled', 'confirmed', 'in_progress'] }
+    });
+
+    if (conflictingAppointment) {
+      return res.status(400).json({
+        success: false,
+        message: 'Time slot is already booked'
+      });
+    }
+
+    const appointment = await Appointment.create({
+      patientId: req.user.id,
+      doctorId,
+      date: appointmentDate,
+      startTime,
+      endTime,
+      type,
+      symptoms,
+      description,
+      consultationFee: doctor.consultationFee,
+      priority: 'medium'
+    });
+
+    const timeSlot = doctor.timeSlots.find((slot) =>
+      slot.date.toDateString() === appointmentDate.toDateString() &&
+      slot.startTime === startTime &&
+      !slot.isBooked
+    );
+
+    if (timeSlot) {
+      timeSlot.isBooked = true;
+      timeSlot.bookedBy = req.user.id;
+      await doctor.save();
+    }
+
+    doctor.totalAppointments += 1;
+    await doctor.save();
+
+    const populatedAppointment = await Appointment.findById(appointment._id)
+      .populate('patientId', 'name email phone')
+      .populate('doctorId', 'userId specialization consultationFee')
+      .populate({
+        path: 'doctorId',
+        populate: {
+          path: 'userId',
+          select: 'name email phone'
+        }
+      });
+
+    try {
+      const appointmentPrioritizer = require('../services/appointmentPrioritizer');
+      await appointmentPrioritizer.calculatePriorityScore(appointment._id);
+    } catch (error) {
+      console.error('Error in appointment prioritization:', error);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Appointment booked successfully',
+      data: populatedAppointment
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const initiateAppointmentPayment = async (req, res, next) => {
+  try {
+    const { paymentMethod = 'mock' } = req.body;
+
+    const appointment = await Appointment.findById(req.params.id)
+      .populate('doctorId', 'consultationFee')
+      .populate({
+        path: 'doctorId',
+        populate: { path: 'userId', select: 'name' }
+      });
+
+    if (!appointment) {
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
+    }
+
+    if (appointment.patientId.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Payment initiated',
+      data: {
+        appointmentId: appointment._id,
+        amount: appointment.consultationFee,
+        currency: 'INR',
+        paymentMethod,
+        orderId: `ORD-${Date.now()}`
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const confirmAppointmentPayment = async (req, res, next) => {
+  try {
+    const { paymentId } = req.body;
+
+    if (!paymentId) {
+      return res.status(400).json({
+        success: false,
+        message: 'paymentId is required'
+      });
+    }
+
+    const appointment = await Appointment.findById(req.params.id);
+
+    if (!appointment) {
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
+    }
+
+    if (appointment.patientId.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    appointment.paymentStatus = 'paid';
+    appointment.paymentId = paymentId;
+    if (appointment.status === 'scheduled') {
+      appointment.status = 'confirmed';
+    }
+
+    await appointment.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Payment confirmed and appointment is now confirmed',
+      data: appointment
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const updateAppointmentStatus = async (req, res, next) => {
+  try {
+    const { status, cancellationReason } = req.body;
+
+    if (!['scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid status'
+      });
+    }
+
+    const appointment = await Appointment.findById(req.params.id);
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+
+    if (req.user.role === 'patient') {
+      if (appointment.patientId.toString() !== req.user.id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
+
+      if (status !== 'cancelled') {
+        return res.status(403).json({
+          success: false,
+          message: 'Patients can only cancel appointments'
+        });
+      }
+
+      if (!appointment.canBeCancelled()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Appointment cannot be cancelled (less than 2 hours before or already in progress)'
+        });
+      }
+    } else if (req.user.role === 'doctor') {
+      const doctor = await Doctor.findOne({ userId: req.user.id });
+      if (!doctor || appointment.doctorId.toString() !== doctor._id.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
+    }
+
+    appointment.status = status;
+
+    if (status === 'cancelled') {
+      appointment.cancellationReason = cancellationReason;
+      appointment.cancelledBy = req.user.id;
+
+      const doctor = await Doctor.findById(appointment.doctorId);
+      const timeSlot = doctor.timeSlots.find((slot) =>
+        slot.date.toDateString() === appointment.date.toDateString() &&
+        slot.startTime === appointment.startTime &&
+        slot.isBooked
+      );
+
+      if (timeSlot) {
+        timeSlot.isBooked = false;
+        timeSlot.bookedBy = null;
+        await doctor.save();
+      }
+    }
+
+    if (status === 'completed') {
+      appointment.videoCallEndTime = new Date();
+
+      const doctor = await Doctor.findById(appointment.doctorId);
+      doctor.completedAppointments += 1;
+      await doctor.save();
+    }
+
+    await appointment.save();
+
+    const updatedAppointment = await Appointment.findById(appointment._id)
+      .populate('patientId', 'name email phone')
+      .populate('doctorId', 'userId specialization')
+      .populate({
+        path: 'doctorId',
+        populate: {
+          path: 'userId',
+          select: 'name email phone'
+        }
+      });
+
+    res.status(200).json({
+      success: true,
+      message: `Appointment status updated to ${status}`,
+      data: updatedAppointment
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const addPrescription = async (req, res, next) => {
+  try {
+    const { medicines, instructions, followUpDate } = req.body;
+
+    const appointment = await Appointment.findById(req.params.id);
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+
+    const doctor = await Doctor.findOne({ userId: req.user.id });
+    if (!doctor || appointment.doctorId.toString() !== doctor._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
+      });
+    }
+
+    appointment.prescription = {
+      medicines,
+      instructions,
+      followUpDate: followUpDate ? new Date(followUpDate) : undefined,
+      issuedAt: new Date()
+    };
+
+    await appointment.save();
+
+    if (appointment.prescription && appointment.prescription.medicines.length > 0) {
+      try {
+        const pharmacyManager = require('../services/pharmacyManager');
+        await pharmacyManager.createOrderFromPrescription(appointment._id);
+      } catch (error) {
+        console.error('Error creating pharmacy order:', error);
+      }
+    }
+
+    const updatedAppointment = await Appointment.findById(appointment._id)
+      .populate('patientId', 'name email phone')
+      .populate('doctorId', 'userId specialization');
+
+    res.status(200).json({
+      success: true,
+      message: 'Prescription added successfully',
+      data: updatedAppointment
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const addDiagnosis = async (req, res, next) => {
+  try {
+    const { diagnosis } = req.body;
+
+    const appointment = await Appointment.findById(req.params.id);
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+
+    const doctor = await Doctor.findOne({ userId: req.user.id });
+    if (!doctor || appointment.doctorId.toString() !== doctor._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
+      });
+    }
+
+    appointment.diagnosis = diagnosis;
+    await appointment.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Diagnosis added successfully',
+      data: appointment
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const startVideoConsultation = async (req, res, next) => {
+  try {
+    const appointment = await Appointment.findById(req.params.id)
+      .populate('patientId', 'name email')
+      .populate({
+        path: 'doctorId',
+        populate: {
+          path: 'userId',
+          select: 'name email'
+        }
+      });
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+
+    const doctor = await Doctor.findOne({ userId: req.user.id });
+    if (!doctor || appointment.doctorId?._id?.toString() !== doctor._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
+      });
+    }
+
+    if (['cancelled', 'completed', 'no_show'].includes(appointment.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot start consultation for ${appointment.status} appointment`
+      });
+    }
+
+    if (!appointment.videoCallLink) {
+      appointment.videoCallLink = `https://meet.jit.si/srgec-consult-${appointment._id}-${Date.now()}`;
+    }
+
+    appointment.videoCallStartTime = new Date();
+
+    if (['scheduled', 'confirmed'].includes(appointment.status)) {
+      appointment.status = 'in_progress';
+    }
+
+    await appointment.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Video consultation started',
+      data: {
+        appointmentId: appointment._id,
+        status: appointment.status,
+        videoCallLink: appointment.videoCallLink,
+        videoCallStartTime: appointment.videoCallStartTime,
+        patientName: appointment.patientId?.name || 'Patient'
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const rateAppointment = async (req, res, next) => {
+  try {
+    const { score, review } = req.body;
+
+    if (!score || score < 1 || score > 5) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rating score must be between 1 and 5'
+      });
+    }
+
+    const appointment = await Appointment.findById(req.params.id);
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+
+    if (appointment.patientId.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
+      });
+    }
+
+    if (appointment.status !== 'completed') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only completed appointments can be rated'
+      });
+    }
+
+    appointment.rating = {
+      score,
+      review,
+      ratedAt: new Date()
+    };
+
+    await appointment.save();
+
+    const doctor = await Doctor.findById(appointment.doctorId);
+    const allRatings = await Appointment.find({
+      doctorId: doctor._id,
+      'rating.score': { $exists: true }
+    }).select('rating.score');
+
+    const totalScore = allRatings.reduce((sum, apt) => sum + apt.rating.score, 0);
+    doctor.rating.average = totalScore / allRatings.length;
+    doctor.rating.count = allRatings.length;
+    await doctor.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Appointment rated successfully',
+      data: appointment
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getAppointmentStats = async (req, res, next) => {
+  try {
+    const totalAppointments = await Appointment.countDocuments();
+    const completedAppointments = await Appointment.countDocuments({ status: 'completed' });
+    const cancelledAppointments = await Appointment.countDocuments({ status: 'cancelled' });
+    const upcomingAppointments = await Appointment.countDocuments({
+      status: { $in: ['scheduled', 'confirmed'] },
+      date: { $gte: new Date() }
+    });
+
+    const byStatus = await Appointment.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const byPriority = await Appointment.aggregate([
+      {
+        $group: {
+          _id: '$priority',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const revenue = await Appointment.aggregate([
+      {
+        $match: { status: 'completed', paymentStatus: 'paid' }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$consultationFee' }
+        }
+      }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        total: totalAppointments,
+        completed: completedAppointments,
+        cancelled: cancelledAppointments,
+        upcoming: upcomingAppointments,
+        byStatus,
+        byPriority,
+        revenue: revenue.length > 0 ? revenue[0].total : 0
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = {
+  getAppointments,
+  getAppointmentById,
+  bookAppointment,
+  initiateAppointmentPayment,
+  confirmAppointmentPayment,
+  updateAppointmentStatus,
+  startVideoConsultation,
+  addPrescription,
+  addDiagnosis,
+  rateAppointment,
+  getAppointmentStats
+};
