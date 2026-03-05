@@ -1,20 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Calendar, Users, Activity, Clock, TrendingUp, Stethoscope, FileText } from 'lucide-react';
+import { Calendar, Users, Activity, Clock, TrendingUp, Stethoscope, FileText, BadgeIndianRupee, AlertTriangle } from 'lucide-react';
 import Button from '../components/ui/Button';
 import HealthChart from '../components/charts/HealthChart';
-import NLPChat from '../components/chat/NLPChat';
-import { appointmentsAPI, doctorsAPI } from '../services/api';
+import { appointmentsAPI, doctorsAPI, emergencyTicketsAPI } from '../services/api';
 
 const DoctorDashboard = () => {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
   const [data, setData] = useState({
     appointments: [],
+    paymentRequests: [],
+    emergencyTickets: [],
     profile: null
   });
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -29,9 +31,11 @@ const DoctorDashboard = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [appointmentsResult, profileResult] = await Promise.allSettled([
-        appointmentsAPI.getAll({ status: 'scheduled' }),
-        doctorsAPI.getProfile()
+      const [appointmentsResult, paymentRequestsResult, profileResult, emergencyTicketsResult] = await Promise.allSettled([
+        appointmentsAPI.getAll({ limit: 100 }),
+        appointmentsAPI.getAll({ status: 'payment_submitted' }),
+        doctorsAPI.getProfile(),
+        emergencyTicketsAPI.getDoctorFeed()
       ]);
 
       if (appointmentsResult.status === 'rejected') {
@@ -44,6 +48,8 @@ const DoctorDashboard = () => {
 
       setData({
         appointments: appointmentsResult.value.data || [],
+        paymentRequests: paymentRequestsResult.status === 'fulfilled' ? paymentRequestsResult.value.data || [] : [],
+        emergencyTickets: emergencyTicketsResult.status === 'fulfilled' ? emergencyTicketsResult.value.data || [] : [],
         profile: profileResult.status === 'fulfilled' ? profileResult.value.data : null
       });
     } catch (error) {
@@ -58,6 +64,8 @@ const DoctorDashboard = () => {
       .map((appointment) => appointment?.patientId?._id)
       .filter(Boolean)
   ).size;
+
+  const pendingAcceptanceCount = data.paymentRequests.length;
 
   const appointmentTrendsMap = data.appointments.reduce((acc, appointment) => {
     const dateValue = appointment?.date;
@@ -142,17 +150,139 @@ const DoctorDashboard = () => {
     }
   ];
 
+  const handlePaymentRequestAction = async (appointmentId, nextStatus) => {
+    try {
+      setActionLoading(true);
+      await appointmentsAPI.updateStatus(appointmentId, nextStatus);
+      await loadData();
+    } catch (error) {
+      console.error('Failed to update payment request:', error);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const renderPaymentRequests = () => (
+    <div className="space-y-4">
+      {data.paymentRequests.length === 0 ? (
+        <div className="bg-white rounded-lg shadow p-6 text-sm text-gray-600">No pending payment requests.</div>
+      ) : (
+        data.paymentRequests.map((request) => (
+          <div key={request._id} className="bg-white rounded-lg shadow p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-semibold text-gray-900">{request?.patientId?.name || 'Patient'}</p>
+                <p className="text-sm text-gray-600">
+                  {new Date(request.date).toLocaleDateString()} • {request.startTime} - {request.endTime}
+                </p>
+              </div>
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">
+                Payment Submitted
+              </span>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-700">
+              <p>UTR: {request?.paymentProof?.utrNumber || request?.paymentId || 'N/A'}</p>
+              <p>Fee: ₹{request?.consultationFee || 0}</p>
+              {request?.paymentProof?.receiptUrl && (
+                <a className="text-blue-700 underline" href={request.paymentProof.receiptUrl} target="_blank" rel="noreferrer">
+                  Open receipt link
+                </a>
+              )}
+              {request?.paymentProof?.receiptImage && !request?.paymentProof?.receiptUrl && (
+                <a className="text-blue-700 underline" href={request.paymentProof.receiptImage} target="_blank" rel="noreferrer">
+                  Open uploaded receipt
+                </a>
+              )}
+            </div>
+
+            <div className="mt-4 flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="success"
+                disabled={actionLoading}
+                onClick={() => handlePaymentRequestAction(request._id, 'confirmed')}
+              >
+                Approve
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={actionLoading}
+                onClick={() => handlePaymentRequestAction(request._id, 'cancelled')}
+              >
+                Reject
+              </Button>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+
   const renderOverview = () => (
     <div className="space-y-6">
+      <div className="bg-white rounded-lg shadow p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-lg font-semibold text-gray-900">Emergency Tickets</h3>
+          <span className="text-xs font-medium px-2 py-1 rounded-full bg-red-100 text-red-700">
+            {data.emergencyTickets.length} Active
+          </span>
+        </div>
+
+        {data.emergencyTickets.length === 0 ? (
+          <p className="text-sm text-gray-600">No active emergency tickets for your hospital.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <div className="flex gap-3 min-w-max pb-1">
+              {data.emergencyTickets.map((ticket) => (
+                <div
+                  key={ticket._id}
+                  className={`w-80 rounded-lg border p-4 ${
+                    ticket.isHighlighted
+                      ? 'border-red-300 bg-red-50'
+                      : 'border-gray-200 bg-gray-50'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className={`w-4 h-4 ${ticket.isHighlighted ? 'text-red-600' : 'text-gray-500'}`} />
+                      <p className="text-sm font-semibold text-gray-900 capitalize">{ticket.incidentType}</p>
+                    </div>
+                    {ticket.isHighlighted && (
+                      <span className="text-[11px] px-2 py-1 rounded-full bg-red-600 text-white">Related Patient</span>
+                    )}
+                  </div>
+
+                  <p className="mt-2 text-sm text-gray-800 font-medium">{ticket?.patient?.name || 'Patient'}</p>
+                  <p className="text-xs text-gray-600 mt-1 line-clamp-3">{ticket.description}</p>
+
+                  <div className="mt-3 flex items-center justify-between text-xs text-gray-600">
+                    <span>{new Date(ticket.createdAt).toLocaleString()}</span>
+                    <span>{ticket.totalNotifiedDoctors} doctors alerted</span>
+                  </div>
+
+                  {ticket.primaryDoctors?.length > 0 && (
+                    <p className="mt-2 text-[11px] text-gray-700">
+                      Priority doctors: {ticket.primaryDoctors.slice(0, 2).map((doctor) => doctor.doctorName).join(', ')}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex items-center">
             <div className="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center text-white">
               <Calendar className="w-6 h-6" />
             </div>
             <div className="ml-4">
-              <p className="text-sm text-gray-600">Today's Appointments</p>
+              <p className="text-sm text-gray-600">Total Appointments</p>
               <p className="text-2xl font-bold text-gray-900">{data.appointments.length}</p>
             </div>
           </div>
@@ -190,6 +320,18 @@ const DoctorDashboard = () => {
             <div className="ml-4">
               <p className="text-sm text-gray-600">Success Rate</p>
               <p className="text-2xl font-bold text-gray-900">{successRate}%</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center">
+            <div className="w-12 h-12 bg-amber-500 rounded-lg flex items-center justify-center text-white">
+              <BadgeIndianRupee className="w-6 h-6" />
+            </div>
+            <div className="ml-4">
+              <p className="text-sm text-gray-600">Pending Acceptance</p>
+              <p className="text-2xl font-bold text-gray-900">{pendingAcceptanceCount}</p>
             </div>
           </div>
         </div>
@@ -308,8 +450,8 @@ const DoctorDashboard = () => {
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: <Activity className="w-4 h-4" /> },
-    { id: 'analytics', label: 'Analytics', icon: <TrendingUp className="w-4 h-4" /> },
-    { id: 'ai', label: 'AI Query', icon: <FileText className="w-4 h-4" /> }
+    { id: 'payment-requests', label: 'Payment Requests', icon: <BadgeIndianRupee className="w-4 h-4" /> },
+    { id: 'analytics', label: 'Analytics', icon: <TrendingUp className="w-4 h-4" /> }
   ];
 
   return (
@@ -387,8 +529,8 @@ const DoctorDashboard = () => {
         ) : (
           <>
             {activeTab === 'overview' && renderOverview()}
+            {activeTab === 'payment-requests' && renderPaymentRequests()}
             {activeTab === 'analytics' && renderAnalytics()}
-            {activeTab === 'ai' && <NLPChat />}
           </>
         )}
       </main>

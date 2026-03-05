@@ -9,6 +9,7 @@ import { appointmentsAPI, doctorsAPI } from '../services/api';
 
 const initialBookForm = {
   state: '',
+  district: '',
   hospital: '',
   specialization: '',
   doctorId: '',
@@ -16,9 +17,90 @@ const initialBookForm = {
   date: '',
   startTime: '',
   endTime: '',
+  paymentUtr: '',
+  paymentReceiptImage: '',
+  paymentReceiptName: '',
   type: 'consultation',
   symptoms: '',
   description: ''
+};
+
+const INDIAN_STATES = [
+  'Andhra Pradesh',
+  'Arunachal Pradesh',
+  'Assam',
+  'Bihar',
+  'Chhattisgarh',
+  'Goa',
+  'Gujarat',
+  'Haryana',
+  'Himachal Pradesh',
+  'Jharkhand',
+  'Karnataka',
+  'Kerala',
+  'Madhya Pradesh',
+  'Maharashtra',
+  'Manipur',
+  'Meghalaya',
+  'Mizoram',
+  'Nagaland',
+  'Odisha',
+  'Punjab',
+  'Rajasthan',
+  'Sikkim',
+  'Tamil Nadu',
+  'Telangana',
+  'Tripura',
+  'Uttar Pradesh',
+  'Uttarakhand',
+  'West Bengal',
+  'Andaman and Nicobar Islands',
+  'Chandigarh',
+  'Dadra and Nagar Haveli and Daman and Diu',
+  'Delhi',
+  'Jammu and Kashmir',
+  'Ladakh',
+  'Lakshadweep',
+  'Puducherry'
+];
+
+const INDIAN_DISTRICTS_BY_STATE = {
+  'Andhra Pradesh': ['Anantapur', 'Chittoor', 'East Godavari', 'Guntur', 'Krishna', 'Kurnool', 'Nellore', 'Srikakulam', 'Visakhapatnam', 'West Godavari'],
+  'Arunachal Pradesh': ['Anjaw', 'Changlang', 'Dibang Valley', 'East Siang', 'Itanagar', 'Lower Subansiri', 'Tawang', 'West Kameng'],
+  Assam: ['Barpeta', 'Cachar', 'Dibrugarh', 'Golaghat', 'Guwahati', 'Jorhat', 'Kamrup', 'Nagaon', 'Silchar', 'Tinsukia'],
+  Bihar: ['Araria', 'Bhagalpur', 'Darbhanga', 'Gaya', 'Katihar', 'Muzaffarpur', 'Nalanda', 'Patna', 'Purnia', 'Samastipur'],
+  Chhattisgarh: ['Balod', 'Bastar', 'Bilaspur', 'Dhamtari', 'Durg', 'Janjgir-Champa', 'Korba', 'Raigarh', 'Raipur', 'Rajnandgaon'],
+  Goa: ['North Goa', 'South Goa'],
+  Gujarat: ['Ahmedabad', 'Anand', 'Bhavnagar', 'Gandhinagar', 'Jamnagar', 'Kutch', 'Rajkot', 'Surat', 'Vadodara', 'Valsad'],
+  Haryana: ['Ambala', 'Faridabad', 'Gurugram', 'Hisar', 'Jhajjar', 'Karnal', 'Kurukshetra', 'Panipat', 'Rohtak', 'Sonipat'],
+  'Himachal Pradesh': ['Bilaspur', 'Chamba', 'Hamirpur', 'Kangra', 'Kullu', 'Mandi', 'Shimla', 'Sirmaur', 'Solan', 'Una'],
+  Jharkhand: ['Bokaro', 'Deoghar', 'Dhanbad', 'Dumka', 'East Singhbhum', 'Hazaribagh', 'Palamu', 'Ranchi', 'Saraikela Kharsawan', 'West Singhbhum'],
+  Karnataka: ['Bagalkot', 'Ballari', 'Belagavi', 'Bengaluru Rural', 'Bengaluru Urban', 'Davanagere', 'Dharwad', 'Kalaburagi', 'Mysuru', 'Udupi'],
+  Kerala: ['Alappuzha', 'Ernakulam', 'Idukki', 'Kannur', 'Kasaragod', 'Kollam', 'Kottayam', 'Kozhikode', 'Malappuram', 'Thiruvananthapuram'],
+  'Madhya Pradesh': ['Bhopal', 'Gwalior', 'Indore', 'Jabalpur', 'Khandwa', 'Ratlam', 'Rewa', 'Sagar', 'Satna', 'Ujjain'],
+  Maharashtra: ['Ahmednagar', 'Aurangabad', 'Kolhapur', 'Mumbai City', 'Mumbai Suburban', 'Nagpur', 'Nashik', 'Pune', 'Solapur', 'Thane'],
+  Manipur: ['Bishnupur', 'Chandel', 'Churachandpur', 'Imphal East', 'Imphal West', 'Senapati', 'Tamenglong', 'Ukhrul'],
+  Meghalaya: ['East Garo Hills', 'East Khasi Hills', 'Jaintia Hills', 'Ri-Bhoi', 'South Garo Hills', 'West Garo Hills', 'West Khasi Hills'],
+  Mizoram: ['Aizawl', 'Champhai', 'Kolasib', 'Lawngtlai', 'Lunglei', 'Mamit', 'Saiha', 'Serchhip'],
+  Nagaland: ['Dimapur', 'Kiphire', 'Kohima', 'Longleng', 'Mokokchung', 'Mon', 'Phek', 'Tuensang', 'Wokha', 'Zunheboto'],
+  Odisha: ['Balangir', 'Cuttack', 'Ganjam', 'Jagatsinghpur', 'Jharsuguda', 'Khordha', 'Mayurbhanj', 'Puri', 'Sambalpur', 'Sundargarh'],
+  Punjab: ['Amritsar', 'Bathinda', 'Firozpur', 'Gurdaspur', 'Hoshiarpur', 'Jalandhar', 'Ludhiana', 'Mohali', 'Patiala', 'Sangrur'],
+  Rajasthan: ['Ajmer', 'Alwar', 'Bikaner', 'Jaipur', 'Jodhpur', 'Kota', 'Pali', 'Sikar', 'Udaipur', 'Sri Ganganagar'],
+  Sikkim: ['East Sikkim', 'North Sikkim', 'South Sikkim', 'West Sikkim'],
+  'Tamil Nadu': ['Chennai', 'Coimbatore', 'Cuddalore', 'Erode', 'Kanchipuram', 'Madurai', 'Salem', 'Thanjavur', 'Tiruchirappalli', 'Tirunelveli'],
+  Telangana: ['Adilabad', 'Hyderabad', 'Karimnagar', 'Khammam', 'Mahabubnagar', 'Medchal', 'Nalgonda', 'Nizamabad', 'Rangareddy', 'Warangal'],
+  Tripura: ['Dhalai', 'Gomati', 'Khowai', 'North Tripura', 'Sepahijala', 'South Tripura', 'Unakoti', 'West Tripura'],
+  'Uttar Pradesh': ['Agra', 'Aligarh', 'Allahabad', 'Bareilly', 'Ghaziabad', 'Gorakhpur', 'Kanpur Nagar', 'Lucknow', 'Meerut', 'Varanasi'],
+  Uttarakhand: ['Almora', 'Dehradun', 'Haridwar', 'Nainital', 'Pauri Garhwal', 'Pithoragarh', 'Tehri Garhwal', 'Udham Singh Nagar'],
+  'West Bengal': ['Alipurduar', 'Bankura', 'Darjeeling', 'Hooghly', 'Howrah', 'Jalpaiguri', 'Kolkata', 'Murshidabad', 'North 24 Parganas', 'South 24 Parganas'],
+  'Andaman and Nicobar Islands': ['Nicobar', 'North and Middle Andaman', 'South Andaman'],
+  Chandigarh: ['Chandigarh'],
+  'Dadra and Nagar Haveli and Daman and Diu': ['Dadra and Nagar Haveli', 'Daman', 'Diu'],
+  Delhi: ['Central Delhi', 'East Delhi', 'New Delhi', 'North Delhi', 'North West Delhi', 'Shahdara', 'South Delhi', 'West Delhi'],
+  'Jammu and Kashmir': ['Anantnag', 'Baramulla', 'Budgam', 'Jammu', 'Kathua', 'Kupwara', 'Pulwama', 'Srinagar', 'Udhampur'],
+  Ladakh: ['Kargil', 'Leh'],
+  Lakshadweep: ['Agatti', 'Amini', 'Kavaratti', 'Minicoy'],
+  Puducherry: ['Karaikal', 'Mahe', 'Puducherry', 'Yanam']
 };
 
 const initialPrescriptionForm = {
@@ -50,22 +132,28 @@ const Appointments = () => {
   const [doctorsInfoMessage, setDoctorsInfoMessage] = useState('');
   const [bookingOptions, setBookingOptions] = useState({
     states: [],
+    districts: [],
     hospitals: [],
     specializations: [],
     nearbyState: null
   });
   const [availableSlots, setAvailableSlots] = useState([]);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
+  const [selectedPaymentRequest, setSelectedPaymentRequest] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('');
   const [prescriptionForm, setPrescriptionForm] = useState(initialPrescriptionForm);
 
   const isPatient = user?.role === 'patient';
   const isDoctor = user?.role === 'doctor';
 
-  const loadAppointments = async () => {
+  const loadAppointments = async (selectedStatus = statusFilter) => {
     try {
       setLoading(true);
       setError('');
-      const response = await appointmentsAPI.getAll({ limit: 50 });
+      const response = await appointmentsAPI.getAll({
+        limit: 50,
+        ...(selectedStatus ? { status: selectedStatus } : {})
+      });
       setAppointments(response?.data || []);
     } catch (loadError) {
       setError(loadError?.message || 'Failed to load appointments');
@@ -79,6 +167,7 @@ const Appointments = () => {
     try {
       const response = await doctorsAPI.getBookingOptions({
         ...(filters.state ? { state: filters.state } : {}),
+        ...(filters.district ? { district: filters.district } : {}),
         ...(filters.hospital ? { hospital: filters.hospital } : {}),
         ...(filters.specialization ? { specialization: filters.specialization } : {})
       });
@@ -88,6 +177,7 @@ const Appointments = () => {
 
       setBookingOptions({
         states: options.states || [],
+        districts: options.districts || [],
         hospitals: options.hospitals || [],
         specializations: options.specializations || [],
         nearbyState: options.nearbyState || null
@@ -114,14 +204,39 @@ const Appointments = () => {
     loadDoctors(initialBookForm);
   }, []);
 
+  const onStatusFilterChange = async (event) => {
+    const nextStatus = event.target.value;
+    setStatusFilter(nextStatus);
+    await loadAppointments(nextStatus);
+  };
+
   const summary = useMemo(() => {
     return {
       total: appointments.length,
-      upcoming: appointments.filter((item) => ['scheduled', 'confirmed'].includes(item.status)).length,
+      upcoming: appointments.filter((item) => ['payment_submitted', 'scheduled', 'confirmed'].includes(item.status)).length,
       completed: appointments.filter((item) => item.status === 'completed').length,
       cancelled: appointments.filter((item) => item.status === 'cancelled').length
     };
   }, [appointments]);
+
+  const selectedDoctor = useMemo(
+    () => doctors.find((doctor) => doctor._id === bookForm.doctorId) || null,
+    [doctors, bookForm.doctorId]
+  );
+
+  const isDoctorPaymentReady = Boolean(selectedDoctor?.paymentDetails?.upiId);
+
+  const districtOptions = useMemo(() => {
+    if (!bookForm.state) return [];
+
+    const stateDistricts = INDIAN_DISTRICTS_BY_STATE[bookForm.state] || [];
+    const backendDistricts = bookingOptions.districts || [];
+
+    return Array.from(new Set([...stateDistricts, ...backendDistricts]))
+      .map((district) => String(district).trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }, [bookForm.state, bookingOptions.districts]);
 
   const computeAvailableSlots = (doctor, selectedDate) => {
     if (!doctor || !selectedDate) return [];
@@ -165,6 +280,42 @@ const Appointments = () => {
       }));
   };
 
+  const fetchAvailableSlots = async (doctorId, selectedDate, doctorFallback) => {
+    if (!doctorId || !selectedDate) {
+      setAvailableSlots([]);
+      return;
+    }
+
+    try {
+      const response = await doctorsAPI.getAvailability(doctorId, selectedDate);
+      const serverSlots = (response?.data || []).map((slot) => ({
+        key: `timeslot-${slot.startTime}-${slot.endTime}`,
+        label: `${slot.startTime} - ${slot.endTime}`,
+        startTime: slot.startTime,
+        endTime: slot.endTime
+      }));
+
+      if (serverSlots.length > 0) {
+        setAvailableSlots(serverSlots);
+        return;
+      }
+    } catch (slotError) {
+      console.error('Failed to fetch doctor slots:', slotError);
+    }
+
+    setAvailableSlots(computeAvailableSlots(doctorFallback, selectedDate));
+  };
+
+  useEffect(() => {
+    if (!bookForm.doctorId || !bookForm.date) {
+      setAvailableSlots([]);
+      return;
+    }
+
+    const selectedDoctor = doctors.find((doctor) => doctor._id === bookForm.doctorId);
+    fetchAvailableSlots(bookForm.doctorId, bookForm.date, selectedDoctor);
+  }, [bookForm.doctorId, bookForm.date, doctors]);
+
   const onBookChange = (event) => {
     const { name, value } = event.target;
 
@@ -172,6 +323,7 @@ const Appointments = () => {
       const nextForm = {
         ...bookForm,
         state: value,
+        district: '',
         hospital: '',
         specialization: '',
         doctorId: '',
@@ -185,7 +337,7 @@ const Appointments = () => {
       return;
     }
 
-    if (name === 'hospital' || name === 'specialization') {
+    if (name === 'district' || name === 'hospital' || name === 'specialization') {
       const nextForm = {
         ...bookForm,
         [name]: value,
@@ -209,8 +361,6 @@ const Appointments = () => {
         endTime: ''
       };
       setBookForm(nextForm);
-      const selectedDoctor = doctors.find((doctor) => doctor._id === value);
-      setAvailableSlots(computeAvailableSlots(selectedDoctor, nextForm.date));
       return;
     }
 
@@ -223,8 +373,6 @@ const Appointments = () => {
         endTime: ''
       };
       setBookForm(nextForm);
-      const selectedDoctor = doctors.find((doctor) => doctor._id === nextForm.doctorId);
-      setAvailableSlots(computeAvailableSlots(selectedDoctor, value));
       return;
     }
 
@@ -242,6 +390,28 @@ const Appointments = () => {
     setBookForm((prev) => ({ ...prev, [name]: value }));
   };
 
+  const onReceiptFileChange = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      setBookForm((prev) => ({
+        ...prev,
+        paymentReceiptImage: '',
+        paymentReceiptName: ''
+      }));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setBookForm((prev) => ({
+        ...prev,
+        paymentReceiptImage: typeof reader.result === 'string' ? reader.result : '',
+        paymentReceiptName: file.name
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
   const submitBookAppointment = async (event) => {
     event.preventDefault();
     setSubmitting(true);
@@ -253,6 +423,9 @@ const Appointments = () => {
         date: bookForm.date,
         startTime: bookForm.startTime,
         endTime: bookForm.endTime,
+        paymentUtr: bookForm.paymentUtr,
+        paymentReceiptImage: bookForm.paymentReceiptImage,
+        paymentReceiptName: bookForm.paymentReceiptName,
         type: bookForm.type,
         symptoms: bookForm.symptoms
           .split(',')
@@ -384,9 +557,26 @@ const Appointments = () => {
                   onChange={onBookChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="">Nearby doctors (auto)</option>
-                  {bookingOptions.states.map((state) => (
+                  <option value=""> Select State</option>
+                  {INDIAN_STATES.map((state) => (
                     <option key={state} value={state}>{state}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">District (optional)</label>
+                <select
+                  name="district"
+                  value={bookForm.district}
+                  onChange={onBookChange}
+                  required={Boolean(bookForm.state)}
+                  disabled={!bookForm.state || districtOptions.length === 0}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">{bookForm.state ? 'All districts' : 'Select state first'}</option>
+                  {districtOptions.map((district) => (
+                    <option key={district} value={district}>{district}</option>
                   ))}
                 </select>
               </div>
@@ -444,6 +634,24 @@ const Appointments = () => {
                 )}
               </div>
 
+              {selectedDoctor && (
+                <div className="md:col-span-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
+                  <p className="text-sm font-medium text-blue-900">Doctor Payment Details</p>
+                  <p className="mt-1 text-sm font-semibold text-blue-900">Amount to Pay: ₹{selectedDoctor?.consultationFee || 0}</p>
+                  <p className="mt-1 text-sm text-blue-800">UPI ID: {selectedDoctor?.paymentDetails?.upiId || 'Not configured by doctor'}</p>
+                  {selectedDoctor?.paymentDetails?.upiQrCode && (
+                    <img
+                      src={selectedDoctor.paymentDetails.upiQrCode}
+                      alt="Doctor UPI scanner"
+                      className="mt-2 h-36 w-36 rounded border border-blue-200 object-cover"
+                    />
+                  )}
+                  {!isDoctorPaymentReady && (
+                    <p className="mt-2 text-xs text-red-700">Doctor has not added UPI details yet. You cannot submit payment proof for this doctor.</p>
+                  )}
+                </div>
+              )}
+
               <Input name="date" type="date" label="Date" value={bookForm.date} onChange={onBookChange} required />
 
               <div>
@@ -469,6 +677,29 @@ const Appointments = () => {
 
               <Input name="startTime" type="time" label="Start Time" value={bookForm.startTime} onChange={onBookChange} required />
               <Input name="endTime" type="time" label="End Time" value={bookForm.endTime} onChange={onBookChange} required />
+
+              <Input
+                name="paymentUtr"
+                label="UTR Number"
+                value={bookForm.paymentUtr}
+                onChange={onBookChange}
+                placeholder="Enter UTR after UPI payment"
+                required
+              />
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Upload Receipt (image)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={onReceiptFileChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+                {bookForm.paymentReceiptName && (
+                  <p className="mt-1 text-xs text-gray-600">Selected: {bookForm.paymentReceiptName}</p>
+                )}
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
                 <select
@@ -502,7 +733,13 @@ const Appointments = () => {
                 />
               </div>
               <div className="md:col-span-2">
-                <Button type="submit" loading={submitting}>Create Appointment</Button>
+                <Button
+                  type="submit"
+                  loading={submitting}
+                  disabled={!isDoctorPaymentReady || !bookForm.paymentReceiptImage}
+                >
+                  Submit Payment & Request Appointment
+                </Button>
               </div>
             </form>
           </section>
@@ -511,7 +748,23 @@ const Appointments = () => {
         <section className="bg-white rounded-lg shadow">
           <div className="p-6 border-b border-gray-200 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Appointment List</h2>
-            <span className="text-sm text-gray-500">{appointments.length} records</span>
+            <div className="flex items-center gap-3">
+              <select
+                value={statusFilter}
+                onChange={onStatusFilterChange}
+                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">All Status</option>
+                <option value="payment_submitted">Pending Acceptance</option>
+                <option value="scheduled">Scheduled</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="in_progress">In Progress</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="no_show">No Show</option>
+              </select>
+              <span className="text-sm text-gray-500">{appointments.length} records</span>
+            </div>
           </div>
 
           {loading ? (
@@ -542,6 +795,22 @@ const Appointments = () => {
                       {appointment?.diagnosis && (
                         <p className="text-sm text-gray-700">Diagnosis: {appointment.diagnosis}</p>
                       )}
+                      {appointment?.paymentProof?.utrNumber && (
+                        <p className="text-sm text-gray-700">UTR: {appointment.paymentProof.utrNumber}</p>
+                      )}
+                      {isPatient && appointment.status === 'cancelled' && appointment.paymentStatus === 'rejected' && (
+                        <p className="text-sm text-amber-700">Your amount will be refunded to you within 2-3 days.</p>
+                      )}
+                      {appointment?.paymentProof?.receiptUrl && (
+                        <a
+                          href={appointment.paymentProof.receiptUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm text-blue-700 underline"
+                        >
+                          View receipt link
+                        </a>
+                      )}
                       {appointment?.prescription?.medicines?.length > 0 && (
                         <p className="text-sm text-gray-700">
                           Prescription: {appointment.prescription.medicines.map((medicine) => medicine.name).join(', ')}
@@ -554,7 +823,7 @@ const Appointments = () => {
                         {appointment.status}
                       </span>
 
-                      {isPatient && ['scheduled', 'confirmed'].includes(appointment.status) && (
+                      {isPatient && ['payment_submitted', 'scheduled'].includes(appointment.status) && (
                         <Button
                           size="sm"
                           variant="danger"
@@ -573,6 +842,34 @@ const Appointments = () => {
                         >
                           Start
                         </Button>
+                      )}
+
+                      {isDoctor && appointment.status === 'payment_submitted' && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setSelectedPaymentRequest(appointment)}
+                          >
+                            View Payment Details
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="success"
+                            onClick={() => updateStatus(appointment._id, 'confirmed')}
+                            loading={submitting}
+                          >
+                            Approve Payment
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            onClick={() => updateStatus(appointment._id, 'cancelled')}
+                            loading={submitting}
+                          >
+                            Reject Request
+                          </Button>
+                        </>
                       )}
 
                       {isDoctor && appointment.status === 'in_progress' && (
@@ -677,6 +974,49 @@ const Appointments = () => {
             <Button type="submit" loading={submitting}>Save</Button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(selectedPaymentRequest)}
+        onClose={() => setSelectedPaymentRequest(null)}
+        title="Payment Validation Details"
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-gray-700">
+            <span className="font-medium">Patient:</span> {selectedPaymentRequest?.patientId?.name || 'N/A'}
+          </p>
+          <p className="text-sm text-gray-700">
+            <span className="font-medium">Date & Slot:</span>{' '}
+            {selectedPaymentRequest?.date ? new Date(selectedPaymentRequest.date).toLocaleDateString() : 'N/A'}
+            {' • '}
+            {selectedPaymentRequest?.startTime || '--:--'} - {selectedPaymentRequest?.endTime || '--:--'}
+          </p>
+          <p className="text-sm text-gray-700">
+            <span className="font-medium">Amount Paid:</span> ₹{selectedPaymentRequest?.consultationFee || 0}
+          </p>
+          <p className="text-sm text-gray-700">
+            <span className="font-medium">UTR Number:</span> {selectedPaymentRequest?.paymentProof?.utrNumber || selectedPaymentRequest?.paymentId || 'N/A'}
+          </p>
+
+          {selectedPaymentRequest?.paymentProof?.receiptImage ? (
+            <div>
+              <p className="text-sm font-medium text-gray-700 mb-1">Uploaded Receipt</p>
+              <img
+                src={selectedPaymentRequest.paymentProof.receiptImage}
+                alt="Uploaded payment receipt"
+                className="max-h-72 w-full rounded-lg border border-gray-200 object-contain"
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-amber-700">No uploaded receipt image found for this request.</p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={() => setSelectedPaymentRequest(null)}>
+              Close
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

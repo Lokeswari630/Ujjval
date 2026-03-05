@@ -28,13 +28,96 @@ const SPECIALIZATIONS = [
   'Radiology'
 ];
 
+const INDIAN_STATES = [
+  'Andhra Pradesh',
+  'Arunachal Pradesh',
+  'Assam',
+  'Bihar',
+  'Chhattisgarh',
+  'Goa',
+  'Gujarat',
+  'Haryana',
+  'Himachal Pradesh',
+  'Jharkhand',
+  'Karnataka',
+  'Kerala',
+  'Madhya Pradesh',
+  'Maharashtra',
+  'Manipur',
+  'Meghalaya',
+  'Mizoram',
+  'Nagaland',
+  'Odisha',
+  'Punjab',
+  'Rajasthan',
+  'Sikkim',
+  'Tamil Nadu',
+  'Telangana',
+  'Tripura',
+  'Uttar Pradesh',
+  'Uttarakhand',
+  'West Bengal',
+  'Andaman and Nicobar Islands',
+  'Chandigarh',
+  'Dadra and Nagar Haveli and Daman and Diu',
+  'Delhi',
+  'Jammu and Kashmir',
+  'Ladakh',
+  'Lakshadweep',
+  'Puducherry'
+];
+
+const INDIAN_DISTRICTS_BY_STATE = {
+  'Andhra Pradesh': ['Anantapur', 'Chittoor', 'East Godavari', 'Guntur', 'Krishna', 'Kurnool', 'Nellore', 'Srikakulam', 'Visakhapatnam', 'West Godavari'],
+  'Arunachal Pradesh': ['Anjaw', 'Changlang', 'Dibang Valley', 'East Siang', 'Itanagar', 'Lower Subansiri', 'Tawang', 'West Kameng'],
+  Assam: ['Barpeta', 'Cachar', 'Dibrugarh', 'Golaghat', 'Guwahati', 'Jorhat', 'Kamrup', 'Nagaon', 'Silchar', 'Tinsukia'],
+  Bihar: ['Araria', 'Bhagalpur', 'Darbhanga', 'Gaya', 'Katihar', 'Muzaffarpur', 'Nalanda', 'Patna', 'Purnia', 'Samastipur'],
+  Chhattisgarh: ['Balod', 'Bastar', 'Bilaspur', 'Dhamtari', 'Durg', 'Janjgir-Champa', 'Korba', 'Raigarh', 'Raipur', 'Rajnandgaon'],
+  Goa: ['North Goa', 'South Goa'],
+  Gujarat: ['Ahmedabad', 'Anand', 'Bhavnagar', 'Gandhinagar', 'Jamnagar', 'Kutch', 'Rajkot', 'Surat', 'Vadodara', 'Valsad'],
+  Haryana: ['Ambala', 'Faridabad', 'Gurugram', 'Hisar', 'Jhajjar', 'Karnal', 'Kurukshetra', 'Panipat', 'Rohtak', 'Sonipat'],
+  'Himachal Pradesh': ['Bilaspur', 'Chamba', 'Hamirpur', 'Kangra', 'Kullu', 'Mandi', 'Shimla', 'Sirmaur', 'Solan', 'Una'],
+  Jharkhand: ['Bokaro', 'Deoghar', 'Dhanbad', 'Dumka', 'East Singhbhum', 'Hazaribagh', 'Palamu', 'Ranchi', 'Saraikela Kharsawan', 'West Singhbhum'],
+  Karnataka: ['Bagalkot', 'Ballari', 'Belagavi', 'Bengaluru Rural', 'Bengaluru Urban', 'Davanagere', 'Dharwad', 'Kalaburagi', 'Mysuru', 'Udupi'],
+  Kerala: ['Alappuzha', 'Ernakulam', 'Idukki', 'Kannur', 'Kasaragod', 'Kollam', 'Kottayam', 'Kozhikode', 'Malappuram', 'Thiruvananthapuram'],
+  'Madhya Pradesh': ['Bhopal', 'Gwalior', 'Indore', 'Jabalpur', 'Khandwa', 'Ratlam', 'Rewa', 'Sagar', 'Satna', 'Ujjain'],
+  Maharashtra: ['Ahmednagar', 'Aurangabad', 'Kolhapur', 'Mumbai City', 'Mumbai Suburban', 'Nagpur', 'Nashik', 'Pune', 'Solapur', 'Thane'],
+  Manipur: ['Bishnupur', 'Chandel', 'Churachandpur', 'Imphal East', 'Imphal West', 'Senapati', 'Tamenglong', 'Ukhrul'],
+  Meghalaya: ['East Garo Hills', 'East Khasi Hills', 'Jaintia Hills', 'Ri-Bhoi', 'South Garo Hills', 'West Garo Hills', 'West Khasi Hills'],
+  Mizoram: ['Aizawl', 'Champhai', 'Kolasib', 'Lawngtlai', 'Lunglei', 'Mamit', 'Saiha', 'Serchhip'],
+  Nagaland: ['Dimapur', 'Kiphire', 'Kohima', 'Longleng', 'Mokokchung', 'Mon', 'Phek', 'Tuensang', 'Wokha', 'Zunheboto'],
+  Odisha: ['Balangir', 'Cuttack', 'Ganjam', 'Jagatsinghpur', 'Jharsuguda', 'Khordha', 'Mayurbhanj', 'Puri', 'Sambalpur', 'Sundargarh'],
+  Punjab: ['Amritsar', 'Bathinda', 'Firozpur', 'Gurdaspur', 'Hoshiarpur', 'Jalandhar', 'Ludhiana', 'Mohali', 'Patiala', 'Sangrur'],
+  Rajasthan: ['Ajmer', 'Alwar', 'Bikaner', 'Jaipur', 'Jodhpur', 'Kota', 'Pali', 'Sikar', 'Udaipur', 'Sri Ganganagar'],
+  Sikkim: ['East Sikkim', 'North Sikkim', 'South Sikkim', 'West Sikkim'],
+  'Tamil Nadu': ['Chennai', 'Coimbatore', 'Cuddalore', 'Erode', 'Kanchipuram', 'Madurai', 'Salem', 'Thanjavur', 'Tiruchirappalli', 'Tirunelveli'],
+  Telangana: ['Adilabad', 'Hyderabad', 'Karimnagar', 'Khammam', 'Mahabubnagar', 'Medchal', 'Nalgonda', 'Nizamabad', 'Rangareddy', 'Warangal'],
+  Tripura: ['Dhalai', 'Gomati', 'Khowai', 'North Tripura', 'Sepahijala', 'South Tripura', 'Unakoti', 'West Tripura'],
+  'Uttar Pradesh': ['Agra', 'Aligarh', 'Allahabad', 'Bareilly', 'Ghaziabad', 'Gorakhpur', 'Kanpur Nagar', 'Lucknow', 'Meerut', 'Varanasi'],
+  Uttarakhand: ['Almora', 'Dehradun', 'Haridwar', 'Nainital', 'Pauri Garhwal', 'Pithoragarh', 'Tehri Garhwal', 'Udham Singh Nagar'],
+  'West Bengal': ['Alipurduar', 'Bankura', 'Darjeeling', 'Hooghly', 'Howrah', 'Jalpaiguri', 'Kolkata', 'Murshidabad', 'North 24 Parganas', 'South 24 Parganas'],
+  'Andaman and Nicobar Islands': ['Nicobar', 'North and Middle Andaman', 'South Andaman'],
+  Chandigarh: ['Chandigarh'],
+  'Dadra and Nagar Haveli and Daman and Diu': ['Dadra and Nagar Haveli', 'Daman', 'Diu'],
+  Delhi: ['Central Delhi', 'East Delhi', 'New Delhi', 'North Delhi', 'North West Delhi', 'Shahdara', 'South Delhi', 'West Delhi'],
+  'Jammu and Kashmir': ['Anantnag', 'Baramulla', 'Budgam', 'Jammu', 'Kathua', 'Kupwara', 'Pulwama', 'Srinagar', 'Udhampur'],
+  Ladakh: ['Kargil', 'Leh'],
+  Lakshadweep: ['Agatti', 'Amini', 'Kavaratti', 'Minicoy'],
+  Puducherry: ['Karaikal', 'Mahe', 'Puducherry', 'Yanam']
+};
+
 const DoctorProfile = () => {
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
   const [form, setForm] = useState({
     specialization: '',
+    state: '',
+    district: '',
     experience: '',
     consultationFee: '',
+    upiId: '',
+    upiQrCode: '',
+    maxAppointmentsPerSlot: '1',
     hospital: '',
     bio: '',
     licenseNumber: '',
@@ -63,10 +146,19 @@ const DoctorProfile = () => {
         label: 'Consultation Fee',
         value: typeof profile.consultationFee === 'number' ? `₹${profile.consultationFee}` : '-'
       },
+      { label: 'UPI ID', value: profile?.paymentDetails?.upiId || '-' },
+      { label: 'Slot Capacity', value: `${profile?.maxAppointmentsPerSlot || 1} per slot` },
+      { label: 'State', value: profile?.userId?.address?.state || '-' },
+      { label: 'District', value: profile?.userId?.address?.city || '-' },
       { label: 'Hospital', value: profile.hospital || '-' },
       { label: 'License Number', value: profile.licenseNumber || '-' }
     ];
   }, [profile]);
+
+  const districtOptions = useMemo(() => {
+    if (!form.state) return [];
+    return INDIAN_DISTRICTS_BY_STATE[form.state] || [];
+  }, [form.state]);
 
   const extractErrorMessage = (err, fallback) => {
     if (!err) return fallback;
@@ -86,8 +178,13 @@ const DoctorProfile = () => {
       setProfile(doctor);
       setForm({
         specialization: doctor?.specialization || '',
+        state: doctor?.userId?.address?.state || '',
+        district: doctor?.userId?.address?.city || '',
         experience: doctor?.experience?.toString() || '',
         consultationFee: doctor?.consultationFee?.toString() || '',
+        upiId: doctor?.paymentDetails?.upiId || '',
+        upiQrCode: doctor?.paymentDetails?.upiQrCode || '',
+        maxAppointmentsPerSlot: (doctor?.maxAppointmentsPerSlot || 1).toString(),
         hospital: doctor?.hospital || '',
         bio: doctor?.bio || '',
         licenseNumber: doctor?.licenseNumber || '',
@@ -110,7 +207,30 @@ const DoctorProfile = () => {
 
   const onChange = (event) => {
     const { name, value } = event.target;
+
+    if (name === 'state') {
+      setForm((prev) => ({ ...prev, state: value, district: '' }));
+      return;
+    }
+
     setForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const onScannerFileChange = (event) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setForm((prev) => ({
+        ...prev,
+        upiQrCode: typeof reader.result === 'string' ? reader.result : prev.upiQrCode
+      }));
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = async (event) => {
@@ -128,8 +248,15 @@ const DoctorProfile = () => {
 
       const payload = {
         specialization: form.specialization,
+        state: form.state,
+        district: form.district,
         experience: Number(form.experience),
         consultationFee: Number(form.consultationFee),
+        paymentDetails: {
+          upiId: form.upiId,
+          upiQrCode: form.upiQrCode
+        },
+        maxAppointmentsPerSlot: Number(form.maxAppointmentsPerSlot || 1),
         hospital: form.hospital,
         bio: form.bio
       };
@@ -155,8 +282,15 @@ const DoctorProfile = () => {
 
       const payload = {
         specialization: form.specialization,
+        state: form.state,
+        district: form.district,
         experience: Number(form.experience),
         consultationFee: Number(form.consultationFee),
+        paymentDetails: {
+          upiId: form.upiId,
+          upiQrCode: form.upiQrCode
+        },
+        maxAppointmentsPerSlot: Number(form.maxAppointmentsPerSlot || 1),
         hospital: form.hospital,
         bio: form.bio,
         licenseNumber: form.licenseNumber,
@@ -223,6 +357,12 @@ const DoctorProfile = () => {
   return (
     <div className="min-h-screen bg-linear-to-b from-blue-50 to-white p-4 sm:p-8">
       <div className="max-w-6xl mx-auto space-y-6">
+        <div>
+          <Link to="/doctor">
+            <Button variant="secondary" type="button">Back to Dashboard</Button>
+          </Link>
+        </div>
+
         {loading ? (
           <div className="bg-white rounded-xl shadow-sm border border-blue-100 p-6 text-sm text-gray-600">Loading profile...</div>
         ) : !profile ? (
@@ -248,6 +388,39 @@ const DoctorProfile = () => {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
+                  <select
+                    name="state"
+                    value={form.state}
+                    onChange={onChange}
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    required
+                  >
+                    <option value="" disabled>Select state</option>
+                    {INDIAN_STATES.map((state) => (
+                      <option key={state} value={state}>{state}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">District</label>
+                  <select
+                    name="district"
+                    value={form.district}
+                    onChange={onChange}
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    required
+                    disabled={!form.state}
+                  >
+                    <option value="" disabled>{form.state ? 'Select district' : 'Select state first'}</option>
+                    {districtOptions.map((district) => (
+                      <option key={district} value={district}>{district}</option>
+                    ))}
+                  </select>
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Experience (years)</label>
                   <input
@@ -282,6 +455,49 @@ const DoctorProfile = () => {
                     onChange={onChange}
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                     placeholder="Hospital name"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">UPI ID</label>
+                  <input
+                    name="upiId"
+                    value={form.upiId}
+                    onChange={onChange}
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    placeholder="name@bank"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">UPI Scanner Image</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={onScannerFileChange}
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                  {form.upiQrCode && (
+                    <img
+                      src={form.upiQrCode}
+                      alt="UPI scanner preview"
+                      className="mt-2 h-28 w-28 rounded border border-gray-200 object-cover"
+                    />
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Max Appointments Per Slot</label>
+                  <input
+                    name="maxAppointmentsPerSlot"
+                    type="number"
+                    min="1"
+                    max="20"
+                    value={form.maxAppointmentsPerSlot}
+                    onChange={onChange}
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                     required
                   />
                 </div>
@@ -363,12 +579,6 @@ const DoctorProfile = () => {
           </div>
         ) : (
           <>
-            <div className="flex justify-end">
-              <Link to="/doctor">
-                <Button variant="secondary" type="button">Back to Dashboard</Button>
-              </Link>
-            </div>
-
             <ProfileCard
               name={profile.userId?.name || 'Doctor'}
               role="doctor"
@@ -409,6 +619,39 @@ const DoctorProfile = () => {
                   </div>
 
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
+                    <select
+                      name="state"
+                      value={form.state}
+                      onChange={onChange}
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      required
+                    >
+                      <option value="" disabled>Select state</option>
+                      {INDIAN_STATES.map((state) => (
+                        <option key={state} value={state}>{state}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">District</label>
+                    <select
+                      name="district"
+                      value={form.district}
+                      onChange={onChange}
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      required
+                      disabled={!form.state}
+                    >
+                      <option value="" disabled>{form.state ? 'Select district' : 'Select state first'}</option>
+                      {districtOptions.map((district) => (
+                        <option key={district} value={district}>{district}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Consultation Fee (₹)</label>
                     <input
                       name="consultationFee"
@@ -426,6 +669,49 @@ const DoctorProfile = () => {
                     <input
                       name="hospital"
                       value={form.hospital}
+                      onChange={onChange}
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">UPI ID</label>
+                    <input
+                      name="upiId"
+                      value={form.upiId}
+                      onChange={onChange}
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      placeholder="name@bank"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">UPI Scanner Image</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={onScannerFileChange}
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    />
+                    {form.upiQrCode && (
+                      <img
+                        src={form.upiQrCode}
+                        alt="UPI scanner preview"
+                        className="mt-2 h-28 w-28 rounded border border-gray-200 object-cover"
+                      />
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Max Appointments Per Slot</label>
+                    <input
+                      name="maxAppointmentsPerSlot"
+                      type="number"
+                      min="1"
+                      max="20"
+                      value={form.maxAppointmentsPerSlot}
                       onChange={onChange}
                       className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                       required

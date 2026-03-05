@@ -113,13 +113,47 @@ const getAppointmentById = async (req, res, next) => {
 
 const bookAppointment = async (req, res, next) => {
   try {
-    const { doctorId, date, startTime, endTime, type, symptoms, description } = req.body;
+    const {
+      doctorId,
+      date,
+      startTime,
+      endTime,
+      type,
+      symptoms,
+      description,
+      paymentUtr,
+      paymentReceiptUrl,
+      paymentReceiptImage,
+      paymentReceiptName
+    } = req.body;
+    const isEmergency = type === 'emergency';
 
     const doctor = await Doctor.findById(doctorId);
     if (!doctor) {
       return res.status(404).json({
         success: false,
         message: 'Doctor not found'
+      });
+    }
+
+    if (!isEmergency && !doctor?.paymentDetails?.upiId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Doctor has not configured UPI payment details yet'
+      });
+    }
+
+    if (!isEmergency && (!paymentUtr || !String(paymentUtr).trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'UTR number is required for payment verification'
+      });
+    }
+
+    if (!isEmergency && !paymentReceiptUrl && !paymentReceiptImage) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment receipt is required'
       });
     }
 
@@ -131,17 +165,17 @@ const bookAppointment = async (req, res, next) => {
       });
     }
 
-    const conflictingAppointment = await Appointment.findOne({
+    const existingInSlot = await Appointment.countDocuments({
       doctorId,
       date: appointmentDate,
       startTime,
-      status: { $in: ['scheduled', 'confirmed', 'in_progress'] }
+      status: { $in: ['payment_submitted', 'scheduled', 'confirmed', 'in_progress'] }
     });
 
-    if (conflictingAppointment) {
+    if (existingInSlot >= (doctor.maxAppointmentsPerSlot || 1)) {
       return res.status(400).json({
         success: false,
-        message: 'Time slot is already booked'
+        message: 'Selected time slot has reached its booking limit'
       });
     }
 
@@ -155,23 +189,34 @@ const bookAppointment = async (req, res, next) => {
       symptoms,
       description,
       consultationFee: doctor.consultationFee,
-      priority: 'medium'
+      priority: 'medium',
+      status: isEmergency ? 'scheduled' : 'payment_submitted',
+      paymentStatus: isEmergency ? 'pending' : 'submitted',
+      paymentId: isEmergency ? undefined : String(paymentUtr).trim(),
+      paymentProof: isEmergency ? undefined : {
+        utrNumber: String(paymentUtr).trim(),
+        receiptUrl: paymentReceiptUrl ? String(paymentReceiptUrl).trim() : '',
+        receiptImage: paymentReceiptImage || '',
+        receiptName: paymentReceiptName ? String(paymentReceiptName).trim() : '',
+        submittedAt: new Date()
+      }
     });
 
-    const timeSlot = doctor.timeSlots.find((slot) =>
-      slot.date.toDateString() === appointmentDate.toDateString() &&
-      slot.startTime === startTime &&
-      !slot.isBooked
-    );
+    if (isEmergency) {
+      const timeSlot = doctor.timeSlots.find((slot) =>
+        slot.date.toDateString() === appointmentDate.toDateString() &&
+        slot.startTime === startTime &&
+        !slot.isBooked
+      );
 
-    if (timeSlot) {
-      timeSlot.isBooked = true;
-      timeSlot.bookedBy = req.user.id;
+      if (timeSlot) {
+        timeSlot.isBooked = true;
+        timeSlot.bookedBy = req.user.id;
+      }
+
+      doctor.totalAppointments += 1;
       await doctor.save();
     }
-
-    doctor.totalAppointments += 1;
-    await doctor.save();
 
     const populatedAppointment = await Appointment.findById(appointment._id)
       .populate('patientId', 'name email phone')
@@ -193,7 +238,9 @@ const bookAppointment = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: 'Appointment booked successfully',
+      message: isEmergency
+        ? 'Emergency appointment created successfully.'
+        : 'Payment proof submitted. Awaiting doctor confirmation.',
       data: populatedAppointment
     });
   } catch (error) {
@@ -279,7 +326,7 @@ const updateAppointmentStatus = async (req, res, next) => {
   try {
     const { status, cancellationReason } = req.body;
 
-    if (!['scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show'].includes(status)) {
+    if (!['payment_submitted', 'scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show'].includes(status)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid status'
@@ -323,6 +370,56 @@ const updateAppointmentStatus = async (req, res, next) => {
           success: false,
           message: 'Access denied'
         });
+      }
+
+      if (status === 'confirmed') {
+        if (appointment.status !== 'payment_submitted') {
+          return res.status(400).json({
+            success: false,
+            message: 'Only payment-submitted appointments can be confirmed by doctor'
+          });
+        }
+
+        const bookedCount = await Appointment.countDocuments({
+          doctorId: appointment.doctorId,
+          date: appointment.date,
+          startTime: appointment.startTime,
+          status: { $in: ['confirmed', 'in_progress', 'completed'] }
+        });
+
+        if (bookedCount >= (doctor.maxAppointmentsPerSlot || 1)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Slot is already full for this time'
+          });
+        }
+
+        const timeSlot = doctor.timeSlots.find((slot) =>
+          slot.date.toDateString() === appointment.date.toDateString() &&
+          slot.startTime === appointment.startTime &&
+          !slot.isBooked
+        );
+
+        if (timeSlot) {
+          timeSlot.isBooked = true;
+          timeSlot.bookedBy = appointment.patientId;
+          await doctor.save();
+        }
+
+        appointment.paymentStatus = 'verified';
+        if (appointment.paymentProof) {
+          appointment.paymentProof.reviewedAt = new Date();
+        }
+
+        doctor.totalAppointments += 1;
+        await doctor.save();
+      }
+
+      if (status === 'cancelled' && appointment.paymentStatus === 'submitted') {
+        appointment.paymentStatus = 'rejected';
+        if (appointment.paymentProof) {
+          appointment.paymentProof.reviewedAt = new Date();
+        }
       }
     }
 

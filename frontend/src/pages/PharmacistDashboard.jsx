@@ -6,7 +6,6 @@ import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Modal from '../components/ui/Modal';
 import HealthChart from '../components/charts/HealthChart';
-import NLPChat from '../components/chat/NLPChat';
 import { pharmacyAPI, pharmacistAPI } from '../services/api';
 
 const PharmacistDashboard = () => {
@@ -420,8 +419,7 @@ const PharmacistDashboard = () => {
   const tabs = [
     { id: 'queue', label: 'Queue', icon: <Clock className="w-4 h-4" /> },
     { id: 'inventory', label: 'Inventory', icon: <Package className="w-4 h-4" /> },
-    { id: 'analytics', label: 'Analytics', icon: <TrendingUp className="w-4 h-4" /> },
-    { id: 'ai', label: 'AI Query', icon: <Activity className="w-4 h-4" /> }
+    { id: 'analytics', label: 'Analytics', icon: <TrendingUp className="w-4 h-4" /> }
   ];
 
   return (
@@ -500,7 +498,6 @@ const PharmacistDashboard = () => {
             {activeTab === 'queue' && renderQueue()}
             {activeTab === 'inventory' && renderInventory()}
             {activeTab === 'analytics' && renderAnalytics()}
-            {activeTab === 'ai' && <NLPChat />}
           </>
         )}
       </main>

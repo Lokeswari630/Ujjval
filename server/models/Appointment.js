@@ -28,7 +28,7 @@ const appointmentSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show'],
+    enum: ['payment_submitted', 'scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show'],
     default: 'scheduled'
   },
   priority: {
@@ -57,11 +57,35 @@ const appointmentSchema = new mongoose.Schema({
   },
   paymentStatus: {
     type: String,
-    enum: ['pending', 'paid', 'refunded'],
+    enum: ['pending', 'submitted', 'verified', 'rejected', 'paid', 'refunded'],
     default: 'pending'
   },
   paymentId: {
     type: String
+  },
+  paymentProof: {
+    utrNumber: {
+      type: String,
+      trim: true,
+      maxlength: [30, 'UTR cannot exceed 30 characters']
+    },
+    receiptImage: {
+      type: String
+    },
+    receiptUrl: {
+      type: String
+    },
+    receiptName: {
+      type: String,
+      trim: true,
+      maxlength: [120, 'Receipt name cannot exceed 120 characters']
+    },
+    submittedAt: {
+      type: Date
+    },
+    reviewedAt: {
+      type: Date
+    }
   },
   notes: {
     type: String,
@@ -153,6 +177,7 @@ appointmentSchema.virtual('duration').get(function() {
 // Virtual for appointment status display
 appointmentSchema.virtual('statusDisplay').get(function() {
   const statusMap = {
+    'payment_submitted': 'Payment Submitted',
     'scheduled': 'Scheduled',
     'confirmed': 'Confirmed',
     'in_progress': 'In Progress',
@@ -172,7 +197,7 @@ appointmentSchema.methods.canBeCancelled = function() {
   
   // Allow cancellation up to 2 hours before appointment
   const timeDiff = appointmentTime - now;
-  return timeDiff > (2 * 60 * 60 * 1000) && ['scheduled', 'confirmed'].includes(this.status);
+  return timeDiff > (2 * 60 * 60 * 1000) && ['payment_submitted', 'scheduled'].includes(this.status);
 };
 
 // Method to check if appointment is upcoming
@@ -182,7 +207,7 @@ appointmentSchema.methods.isUpcoming = function() {
   const [hours, minutes] = this.startTime.split(':');
   appointmentTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
   
-  return appointmentTime > now && ['scheduled', 'confirmed'].includes(this.status);
+  return appointmentTime > now && ['payment_submitted', 'scheduled', 'confirmed'].includes(this.status);
 };
 
 // Pre-save middleware to validate time logic

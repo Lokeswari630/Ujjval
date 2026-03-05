@@ -64,6 +64,22 @@ const doctorSchema = new mongoose.Schema({
     required: [true, 'Consultation fee is required'],
     min: [0, 'Fee cannot be negative']
   },
+  paymentDetails: {
+    upiId: {
+      type: String,
+      trim: true,
+      maxlength: [80, 'UPI ID cannot exceed 80 characters']
+    },
+    upiQrCode: {
+      type: String
+    }
+  },
+  maxAppointmentsPerSlot: {
+    type: Number,
+    min: [1, 'Max appointments per slot must be at least 1'],
+    max: [20, 'Max appointments per slot cannot exceed 20'],
+    default: 1
+  },
   hospital: {
     type: String,
     trim: true,

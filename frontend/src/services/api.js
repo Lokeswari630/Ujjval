@@ -421,8 +421,15 @@ export const doctorsAPI = {
   getProfile: () => API.get('/doctors/profile/me'),
   createProfile: (profileData) => API.post('/doctors', profileData),
   updateProfile: (id, data) => API.put(`/doctors/${id}`, data),
-  getAvailability: (id) => API.get(`/doctors/${id}/timeslots`),
+  getAvailability: (id, date) => API.get(`/doctors/${id}/timeslots`, {
+    params: date ? { date } : undefined
+  }),
   updateAvailability: (id, availability) => API.put(`/doctors/${id}/availability`, availability),
+};
+
+export const emergencyTicketsAPI = {
+  create: (payload) => API.post('/emergency-tickets', payload),
+  getDoctorFeed: () => API.get('/emergency-tickets/doctor-feed')
 };
 
 // Users API

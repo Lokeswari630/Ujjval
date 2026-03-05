@@ -21,7 +21,7 @@ const LandingPage = () => {
     <div className="min-h-screen bg-linear-to-b from-blue-50 to-white text-gray-900">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
         <section className="text-center max-w-3xl mx-auto">
-          <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-gray-900">Smart Hospital Assistant</h1>
+          <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-gray-900">CarePulse Assistant</h1>
           <p className="mt-4 text-lg text-gray-600">AI-powered healthcare made simple</p>
           <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3">
             <Link to="/login"><Button>Login</Button></Link>
@@ -69,12 +69,12 @@ const LandingPage = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
             <h4 className="font-semibold text-gray-900">Contact</h4>
-            <p className="text-sm text-gray-600 mt-2">Email: support@smarthospital.demo</p>
+            <p className="text-sm text-gray-600 mt-2">Email: support@carepulse.demo</p>
             <p className="text-sm text-gray-600">Phone: +91 90000 00000</p>
           </div>
           <div>
             <h4 className="font-semibold text-gray-900">About</h4>
-            <p className="text-sm text-gray-600 mt-2">Smart Hospital Assistant helps hospitals improve care experience using AI, NLP, and automation.</p>
+            <p className="text-sm text-gray-600 mt-2">CarePulse Assistant helps hospitals improve care experience using AI, NLP, and automation.</p>
           </div>
         </div>
       </footer>

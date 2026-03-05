@@ -83,6 +83,7 @@ app.use('/api/priority', require('./routes/priority'));
 app.use('/api/nlp-query', require('./routes/nlp-query'));
 app.use('/api/pharmacist', require('./routes/pharmacist'));
 app.use('/api/monitoring', require('./routes/monitoring'));
+app.use('/api/emergency-tickets', require('./routes/emergencyTickets'));
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -102,7 +103,7 @@ let server;
 const startServer = (port) => {
   server = app.listen(port, () => {
     console.log(`
-🏥 Smart Hospital Assistant Backend Server Running!
+🏥 CarePulse Assistant Backend Server Running!
 📍 Port: ${port}
 🌍 Environment: ${process.env.NODE_ENV || 'development'}
 🕒 Started at: ${new Date().toLocaleString()}

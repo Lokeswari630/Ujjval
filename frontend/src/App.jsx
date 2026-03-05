@@ -4,6 +4,7 @@ import { AuthProvider, AuthContext } from './contexts/AuthContext';
 import Auth from './pages/Auth';
 import LandingPage from './pages/LandingPage';
 import PatientDashboard from './pages/PatientDashboard';
+import PatientHealthPredictions from './pages/PatientHealthPredictions';
 import DoctorDashboard from './pages/DoctorDashboard';
 import PharmacistDashboard from './pages/PharmacistDashboard';
 import AdminDashboard from './pages/AdminDashboard';
@@ -14,6 +15,8 @@ import AdminProfile from './pages/AdminProfile';
 import Appointments from './pages/Appointments';
 import DoctorHealthPredictions from './pages/DoctorHealthPredictions';
 import DoctorPatientInsights from './pages/DoctorPatientInsights';
+import EmergencyIncident from './pages/EmergencyIncident';
+import FloatingNLPWidget from './components/chat/FloatingNLPWidget';
 import { useContext } from 'react';
 
 // Create a client
@@ -82,6 +85,36 @@ const RoleHomeRedirect = () => {
   return <Navigate to="/dashboard" replace />;
 };
 
+const HealthPredictionRedirect = () => {
+  const authContext = useContext(AuthContext);
+  const { user } = authContext || {};
+
+  if (user?.role === 'patient') {
+    return <Navigate to="/patient/health-predictions" replace />;
+  }
+
+  if (user?.role === 'doctor') {
+    return <Navigate to="/health-predictions" replace />;
+  }
+
+  return <Navigate to="/dashboard" replace />;
+};
+
+const PharmacyRedirect = () => {
+  const authContext = useContext(AuthContext);
+  const { user } = authContext || {};
+
+  if (user?.role === 'patient') {
+    return <Navigate to="/patient?tab=prescriptions" replace />;
+  }
+
+  if (user?.role === 'pharmacist') {
+    return <Navigate to="/pharmacist" replace />;
+  }
+
+  return <Navigate to="/dashboard" replace />;
+};
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -98,6 +131,14 @@ function App() {
               {/* Profile Routes */}
               <Route
                 path="/patient-profile"
+                element={
+                  <ProtectedRoute allowedRole="patient">
+                    <PatientProfile />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/profile"
                 element={
                   <ProtectedRoute allowedRole="patient">
                     <PatientProfile />
@@ -150,6 +191,24 @@ function App() {
               />
 
               <Route
+                path="/patient/health-predictions"
+                element={
+                  <ProtectedRoute allowedRole="patient">
+                    <PatientHealthPredictions />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/emergency/incidents"
+                element={
+                  <ProtectedRoute allowedRole="patient">
+                    <EmergencyIncident />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
                 path="/doctor-queue"
                 element={
                   <ProtectedRoute allowedRole="doctor">
@@ -194,9 +253,23 @@ function App() {
               />
 
               {/* Route aliases for quick actions */}
-              <Route path="/health-prediction" element={<RoleHomeRedirect />} />
+              <Route
+                path="/health-prediction"
+                element={
+                  <ProtectedRoute>
+                    <HealthPredictionRedirect />
+                  </ProtectedRoute>
+                }
+              />
               <Route path="/profile" element={<RoleHomeRedirect />} />
-              <Route path="/pharmacy" element={<RoleHomeRedirect />} />
+              <Route
+                path="/pharmacy"
+                element={
+                  <ProtectedRoute>
+                    <PharmacyRedirect />
+                  </ProtectedRoute>
+                }
+              />
               <Route path="/doctors" element={<RoleHomeRedirect />} />
               <Route path="/inventory" element={<RoleHomeRedirect />} />
               <Route path="/orders" element={<RoleHomeRedirect />} />
@@ -240,6 +313,7 @@ function App() {
               
               <Route path="*" element={<RoleHomeRedirect />} />
             </Routes>
+            <FloatingNLPWidget />
           </div>
         </Router>
       </AuthProvider>

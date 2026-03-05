@@ -1,6 +1,8 @@
 const Doctor = require('../models/Doctor');
 const User = require('../models/User');
 
+const escapeRegex = (value = '') => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const getDoctors = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page, 10) || 1;
@@ -56,6 +58,7 @@ const getDoctors = async (req, res, next) => {
 const getDoctorBookingOptions = async (req, res, next) => {
   try {
     const stateParam = String(req.query.state || '').trim();
+    const districtParam = String(req.query.district || '').trim();
     const hospitalParam = String(req.query.hospital || '').trim();
     const specializationParam = String(req.query.specialization || '').trim();
 
@@ -65,13 +68,42 @@ const getDoctorBookingOptions = async (req, res, next) => {
 
     const effectiveState = stateParam || nearbyState;
 
-    const userQuery = { role: 'doctor' };
-    if (effectiveState) {
-      userQuery['address.state'] = { $regex: `^${effectiveState}$`, $options: 'i' };
+    const allDoctorUsers = await User.find({ role: 'doctor' })
+      .select('_id address city state');
+
+    const stateRegex = effectiveState ? new RegExp(`^${escapeRegex(effectiveState)}$`, 'i') : null;
+
+    let stateScopedDoctorUsers = stateRegex
+      ? allDoctorUsers.filter((user) => {
+        const nestedState = String(user?.address?.state || '').trim();
+        const legacyState = String(user?.state || '').trim();
+        return stateRegex.test(nestedState) || stateRegex.test(legacyState);
+      })
+      : allDoctorUsers;
+
+    if (stateRegex && stateScopedDoctorUsers.length === 0) {
+      stateScopedDoctorUsers = allDoctorUsers;
     }
 
-    const scopedDoctorUsers = await User.find(userQuery)
-      .select('_id address city state');
+    const districtRegex = districtParam ? new RegExp(`^${escapeRegex(districtParam)}$`, 'i') : null;
+
+    const hasDistrictData = stateScopedDoctorUsers.some((user) => {
+      const nestedCity = String(user?.address?.city || '').trim();
+      const legacyCity = String(user?.city || '').trim();
+      return Boolean(nestedCity || legacyCity);
+    });
+
+    let scopedDoctorUsers = districtRegex && hasDistrictData
+      ? stateScopedDoctorUsers.filter((user) => {
+        const nestedCity = String(user?.address?.city || '').trim();
+        const legacyCity = String(user?.city || '').trim();
+        return districtRegex.test(nestedCity) || districtRegex.test(legacyCity);
+      })
+      : stateScopedDoctorUsers;
+
+    if (districtRegex && scopedDoctorUsers.length === 0) {
+      scopedDoctorUsers = stateScopedDoctorUsers;
+    }
 
     const scopedUserIds = scopedDoctorUsers.map((item) => item._id);
 
@@ -80,7 +112,7 @@ const getDoctorBookingOptions = async (req, res, next) => {
       : { userId: null };
 
     if (hospitalParam) {
-      optionsQuery.hospital = { $regex: `^${hospitalParam}$`, $options: 'i' };
+      optionsQuery.hospital = { $regex: `^${escapeRegex(hospitalParam)}$`, $options: 'i' };
     }
 
     const optionsDoctors = await Doctor.find(optionsQuery)
@@ -92,21 +124,25 @@ const getDoctorBookingOptions = async (req, res, next) => {
     };
 
     if (specializationParam) {
-      doctorsQuery.specialization = specializationParam;
+      doctorsQuery.specialization = { $regex: `^${escapeRegex(specializationParam)}$`, $options: 'i' };
     }
 
     const doctors = await Doctor.find(doctorsQuery)
       .populate('userId', 'name email phone profileImage address')
       .sort({ experience: -1, createdAt: -1 });
 
-    const allDoctors = await Doctor.find({})
-      .populate('userId', 'address');
-
     const states = Array.from(new Set(
-      allDoctors
-        .map((doctor) => doctor?.userId?.address?.state)
+      allDoctorUsers
+        .map((user) => user?.address?.state || user?.state)
         .filter(Boolean)
         .map((state) => String(state).trim())
+    )).sort((a, b) => a.localeCompare(b));
+
+    const districts = Array.from(new Set(
+      stateScopedDoctorUsers
+        .map((user) => user?.address?.city || user?.city)
+        .filter(Boolean)
+        .map((city) => String(city).trim())
     )).sort((a, b) => a.localeCompare(b));
 
     const hospitals = Array.from(new Set(
@@ -126,6 +162,7 @@ const getDoctorBookingOptions = async (req, res, next) => {
       success: true,
       data: {
         states,
+        districts,
         hospitals,
         specializations,
         nearbyState: nearbyState || null,
@@ -200,14 +237,24 @@ const createDoctorProfile = async (req, res, next) => {
       });
     }
 
+    const { state, district, ...doctorPayload } = req.body;
+
     const doctorData = {
-      ...req.body,
+      ...doctorPayload,
       userId: req.user.id
     };
 
     const doctor = await Doctor.create(doctorData);
 
-    await User.findByIdAndUpdate(req.user.id, { isVerified: false });
+    const userUpdate = { isVerified: false };
+    if (state) {
+      userUpdate['address.state'] = String(state).trim();
+    }
+    if (district) {
+      userUpdate['address.city'] = String(district).trim();
+    }
+
+    await User.findByIdAndUpdate(req.user.id, userUpdate);
 
     res.status(201).json({
       success: true,
@@ -249,11 +296,26 @@ const updateDoctorProfile = async (req, res, next) => {
       }
     }
 
+    const { state, district, ...doctorPayload } = req.body;
+
     const updatedDoctor = await Doctor.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      doctorPayload,
       { new: true, runValidators: true }
-    ).populate('userId', 'name email phone profileImage');
+    ).populate('userId', 'name email phone profileImage address');
+
+    const userAddressUpdate = {};
+    if (state !== undefined) {
+      userAddressUpdate['address.state'] = String(state).trim();
+    }
+    if (district !== undefined) {
+      userAddressUpdate['address.city'] = String(district).trim();
+    }
+
+    if (Object.keys(userAddressUpdate).length > 0) {
+      await User.findByIdAndUpdate(doctor.userId, userAddressUpdate);
+      updatedDoctor.userId = await User.findById(doctor.userId).select('name email phone profileImage address');
+    }
 
     res.status(200).json({
       success: true,
