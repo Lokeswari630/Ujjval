@@ -1,9 +1,29 @@
 import axios from 'axios';
 
+const ensureApiPath = (baseUrl) => {
+  const trimmed = String(baseUrl || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+
+  // If /api is omitted in env config, append it so endpoint paths resolve correctly.
+  if (/\/api$/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  const hasPath = /^https?:\/\//i.test(trimmed) && (() => {
+    try {
+      return new URL(trimmed).pathname !== '/';
+    } catch {
+      return false;
+    }
+  })();
+
+  return hasPath ? trimmed : `${trimmed}/api`;
+};
+
 const resolveApiBaseUrl = () => {
   const configured = String(import.meta.env.VITE_API_BASE_URL || '').trim();
   if (configured) {
-    return configured;
+    return ensureApiPath(configured);
   }
 
   if (typeof window !== 'undefined') {
