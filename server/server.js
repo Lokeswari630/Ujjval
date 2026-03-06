@@ -36,14 +36,19 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
   ? configuredOrigins
   : Array.from(new Set([...defaultDevOrigins, ...configuredOrigins]));
 
+const allowAllOrigins = process.env.CORS_ALLOW_ALL === 'true' ||
+  (process.env.NODE_ENV === 'production' && allowedOrigins.length === 0);
+
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (allowAllOrigins || !origin || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
     return callback(new Error(`CORS blocked for origin: ${origin}`));
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Rate limiting

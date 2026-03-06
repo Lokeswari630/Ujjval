@@ -1,8 +1,29 @@
 import axios from 'axios';
 
+const resolveApiBaseUrl = () => {
+  const configured = String(import.meta.env.VITE_API_BASE_URL || '').trim();
+  if (configured) {
+    return configured;
+  }
+
+  if (typeof window !== 'undefined') {
+    const { hostname, origin } = window.location;
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+
+    if (isLocalhost) {
+      return 'http://localhost:5000/api';
+    }
+
+    // Production-safe fallback when env var is missing.
+    return `${origin.replace(/\/$/, '')}/api`;
+  }
+
+  return 'http://localhost:5000/api';
+};
+
 // Create axios instance with base configuration
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
+  baseURL: resolveApiBaseUrl(),
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',

@@ -43,7 +43,7 @@ console.log('2. Testing NLP Health Service...');
 const nlpHealthService = require('./services/nlpHealthService');
 
 const testQueries = [
-  'Book cardiologist tomorrow morning',
+  'Book Pediatrics tomorrow morning',
   'I have headache and fever',
   'Check my medicine status',
   'Find available pediatricians'

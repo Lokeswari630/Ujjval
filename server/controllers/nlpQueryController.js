@@ -103,7 +103,8 @@ const roleSuggestions = {
     'Go to my appointments page',
     'Open my profile page',
     'Show my upcoming appointments',
-    'Book appointment with cardiologist tomorrow',
+    'Book appointment with pediatrics tomorrow',
+    'Show nearby hospitals',
     'I have fever and cough, what should I do at home?'
   ],
   doctor: [
@@ -119,8 +120,96 @@ const roleSuggestions = {
   pharmacist: [
     'Open inventory page',
     'Open pharmacy page',
-    'Check low stock medicines'
+    'Check low stock medicines',
+    'Show nearby hospitals'
   ]
+};
+
+const HOSPITAL_DIRECTORY = [
+  {
+    name: 'CityCare Multispeciality Hospital',
+    city: 'hyderabad',
+    state: 'telangana',
+    phone: '04022001111',
+    emergency24x7: true,
+    specialties: ['cardiology', 'orthopedics', 'general medicine'],
+    baseDistanceKm: 2.4
+  },
+  {
+    name: 'Sunrise Emergency & Trauma Center',
+    city: 'hyderabad',
+    state: 'telangana',
+    phone: '04022002222',
+    emergency24x7: true,
+    specialties: ['emergency', 'neurology', 'icu'],
+    baseDistanceKm: 3.1
+  },
+  {
+    name: 'Green Valley General Hospital',
+    city: 'warangal',
+    state: 'telangana',
+    phone: '08702200333',
+    emergency24x7: true,
+    specialties: ['general medicine', 'pediatrics'],
+    baseDistanceKm: 4.6
+  },
+  {
+    name: 'Metro Lifeline Hospital',
+    city: 'vijayawada',
+    state: 'andhra pradesh',
+    phone: '08662200444',
+    emergency24x7: true,
+    specialties: ['cardiology', 'nephrology'],
+    baseDistanceKm: 5.2
+  },
+  {
+    name: 'Community Health Hospital',
+    city: 'visakhapatnam',
+    state: 'andhra pradesh',
+    phone: '08912200555',
+    emergency24x7: false,
+    specialties: ['general medicine', 'dermatology'],
+    baseDistanceKm: 6.3
+  }
+];
+
+const getNearbyHospitals = (user, rawQuery = '') => {
+  const normalizedQuery = String(rawQuery || '').toLowerCase();
+  const userCity = String(user?.address?.city || '').trim().toLowerCase();
+  const userState = String(user?.address?.state || '').trim().toLowerCase();
+
+  const matchedByQuery = HOSPITAL_DIRECTORY.filter((hospital) =>
+    (hospital.city && normalizedQuery.includes(hospital.city)) ||
+    (hospital.state && normalizedQuery.includes(hospital.state))
+  );
+
+  const pool = matchedByQuery.length > 0
+    ? matchedByQuery
+    : HOSPITAL_DIRECTORY.filter((hospital) =>
+      (userCity && hospital.city === userCity) || (userState && hospital.state === userState)
+    );
+
+  const fallbackPool = pool.length > 0 ? pool : HOSPITAL_DIRECTORY;
+
+  return fallbackPool
+    .map((hospital) => {
+      const cityMatchBoost = userCity && hospital.city === userCity ? -1.4 : 0;
+      const stateMatchBoost = !cityMatchBoost && userState && hospital.state === userState ? -0.6 : 0;
+      const adjustedDistance = Math.max(1, Number((hospital.baseDistanceKm + cityMatchBoost + stateMatchBoost).toFixed(1)));
+
+      return {
+        name: hospital.name,
+        city: hospital.city,
+        state: hospital.state,
+        phone: hospital.phone,
+        distanceKm: adjustedDistance,
+        emergency24x7: hospital.emergency24x7,
+        specialties: hospital.specialties,
+        status: hospital.emergency24x7 ? '24x7 emergency available' : 'General OP availability'
+      };
+    })
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .slice(0, 6);
 };
 
 const getSuggestionsForRole = (role) => roleSuggestions[role] || roleSuggestions.patient;
@@ -201,6 +290,15 @@ const parseIntent = (rawQuery) => {
     return {
       intent: 'inventory.lowStock',
       confidence: 0.89,
+      entities: {},
+      pipeline
+    };
+  }
+
+  if (has(['nearby hospital', 'near hospital', 'hospitals nearby', 'show hospitals', 'list hospitals', 'emergency hospital', 'hospital near me'])) {
+    return {
+      intent: 'hospitals.nearby',
+      confidence: 0.9,
       entities: {},
       pipeline
     };
@@ -461,6 +559,19 @@ const executeIntent = async (parsed, user) => {
       resultType: 'inventory',
       data: rows,
       columns: ['name', 'brand', 'stock', 'minStockLevel', 'expiryDate']
+    };
+  }
+
+  if (intent === 'hospitals.nearby') {
+    const rows = getNearbyHospitals(user, parsed?.pipeline?.original || '');
+
+    return {
+      message: rows.length > 0
+        ? `Found ${rows.length} nearby hospital${rows.length > 1 ? 's' : ''}.`
+        : 'No nearby hospitals found right now.',
+      resultType: 'hospitals',
+      data: rows,
+      columns: ['name', 'distanceKm', 'city', 'phone', 'status']
     };
   }
 
