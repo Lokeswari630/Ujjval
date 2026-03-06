@@ -9,11 +9,35 @@ const errorHandler = require('./middleware/errorHandler');
 // Load environment variables
 dotenv.config();
 
+const getMissingRequiredEnvVars = () => {
+  const required = ['MONGO_URI', 'JWT_SECRET'];
+  return required.filter((name) => !String(process.env[name] || '').trim());
+};
+
+const isValidJwtExpire = (value) => {
+  const normalized = String(value || '').trim().replace(/^['\"]|['\"]$/g, '').trim();
+  return normalized === '' || /^\d+$/.test(normalized) || /^\d+(ms|s|m|h|d|w|y)$/i.test(normalized);
+};
+
+const missingEnvVars = getMissingRequiredEnvVars();
+if (missingEnvVars.length > 0) {
+  console.error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
+  process.exit(1);
+}
+
+if (!isValidJwtExpire(process.env.JWT_EXPIRE)) {
+  console.error('Invalid JWT_EXPIRE format. Use values like 3600, 60m, 24h, or 7d.');
+  process.exit(1);
+}
+
 // Connect to database
 connectDB();
 
 // Initialize express app
 const app = express();
+
+// Required on platforms like Render so req.ip resolves to the real client IP.
+app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet());

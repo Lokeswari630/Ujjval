@@ -5,6 +5,21 @@ import { User, Mail, Lock, Stethoscope, Pill, Shield } from 'lucide-react';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 
+const getReadableAuthError = (error) => {
+  if (!error) return 'Unknown authentication error';
+  if (typeof error === 'string') return error;
+  if (error.message) return error.message;
+
+  if (Array.isArray(error.errors) && error.errors.length > 0) {
+    const firstError = error.errors[0];
+    if (typeof firstError === 'string') return firstError;
+    if (firstError?.msg) return firstError.msg;
+    if (firstError?.message) return firstError.message;
+  }
+
+  return 'Authentication request failed';
+};
+
 const Auth = () => {
   const location = useLocation();
   const [isLogin, setIsLogin] = useState(() => location.pathname !== '/register');
@@ -125,7 +140,12 @@ const Auth = () => {
       const userRole = authResponse?.user?.role || formData.role;
       navigate(getHomeRouteByRole(userRole));
     } catch (error) {
-      console.error('Auth error:', error);
+      const status = error?.status || error?.statusCode;
+      console.error('Auth error:', {
+        message: getReadableAuthError(error),
+        status: status || 'unknown',
+        raw: error,
+      });
     }
   };
 

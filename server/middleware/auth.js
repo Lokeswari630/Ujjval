@@ -1,6 +1,22 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+const resolveJwtExpiry = () => {
+  const raw = String(process.env.JWT_EXPIRE || '').trim();
+  if (!raw) return '7d';
+
+  // Remove surrounding quotes that are sometimes copied into env dashboards.
+  const normalized = raw.replace(/^['\"]|['\"]$/g, '').trim();
+
+  // Accept plain seconds or common timespan values (e.g., 3600, 60m, 7d).
+  if (/^\d+$/.test(normalized) || /^\d+(ms|s|m|h|d|w|y)$/i.test(normalized)) {
+    return normalized;
+  }
+
+  console.warn(`Invalid JWT_EXPIRE value \"${raw}\". Falling back to 7d.`);
+  return '7d';
+};
+
 // Middleware to protect routes
 const protect = async (req, res, next) => {
   let token;
@@ -87,8 +103,12 @@ const authorizeOwnerOrAdmin = (resourceUserIdField = 'userId') => {
 
 // Generate JWT token
 const generateToken = (id) => {
+  if (!String(process.env.JWT_SECRET || '').trim()) {
+    throw new Error('Server configuration error: JWT_SECRET is missing.');
+  }
+
   return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRE
+    expiresIn: resolveJwtExpiry()
   });
 };
 

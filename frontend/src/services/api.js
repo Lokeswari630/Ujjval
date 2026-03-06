@@ -41,10 +41,21 @@ const resolveApiBaseUrl = () => {
   return 'http://localhost:5000/api';
 };
 
+const resolveApiTimeoutMs = () => {
+  const raw = String(import.meta.env.VITE_API_TIMEOUT_MS || '').trim();
+  const parsed = Number(raw);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+
+  // Render cold starts can exceed 10s.
+  return 30000;
+};
+
 // Create axios instance with base configuration
 const API = axios.create({
   baseURL: resolveApiBaseUrl(),
-  timeout: 10000,
+  timeout: resolveApiTimeoutMs(),
   headers: {
     'Content-Type': 'application/json',
   },
@@ -62,6 +73,17 @@ const isNetworkError = (error) => {
   return errorCode === 'ERR_NETWORK' ||
     errorMessage.includes('Network Error') ||
     errorMessage.includes('ERR_CONNECTION_REFUSED');
+};
+
+const isTimeoutError = (error) => {
+  if (!error) return false;
+
+  if (typeof error === 'object' && error?.code === 'ECONNABORTED') {
+    return true;
+  }
+
+  const errorMessage = getErrorMessage(error);
+  return errorMessage.includes('timeout');
 };
 
 const isMockAuthEnabled = import.meta.env.VITE_ENABLE_MOCK_AUTH === 'true';
@@ -91,12 +113,28 @@ API.interceptors.response.use(
     return response.data;
   },
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status;
+
+    if (status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      // Use root path for hosts that don't support SPA rewrites for /login.
+      window.location.href = '/';
     }
-    return Promise.reject(error.response?.data || error.message);
+
+    const responseData = error.response?.data;
+    if (responseData && typeof responseData === 'object') {
+      return Promise.reject({
+        ...responseData,
+        status,
+      });
+    }
+
+    return Promise.reject({
+      success: false,
+      message: error.message || 'Request failed',
+      status,
+    });
   }
 );
 
@@ -277,6 +315,9 @@ export const authAPI = {
     try {
       return await API.post('/auth/login', credentials);
     } catch (error) {
+      if (isTimeoutError(error)) {
+        throw new Error('Server is taking too long to respond. If hosted on Render, wait 20-40 seconds and try again.');
+      }
       if (isMockAuthEnabled && isNetworkError(error)) {
         console.log('Backend not running, using mock authentication');
         return await mockAuth.login(credentials);
@@ -291,6 +332,9 @@ export const authAPI = {
     try {
       return await API.post('/auth/register', userData);
     } catch (error) {
+      if (isTimeoutError(error)) {
+        throw new Error('Server is taking too long to respond. If hosted on Render, wait 20-40 seconds and try again.');
+      }
       if (isMockAuthEnabled && isNetworkError(error)) {
         console.log('Backend not running, using mock authentication');
         return await mockAuth.register(userData);
