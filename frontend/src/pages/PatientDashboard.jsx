@@ -21,6 +21,8 @@ const PatientDashboard = () => {
   const [monitoring, setMonitoring] = useState({ chart: [], alerts: [] });
   const [vitalsInput, setVitalsInput] = useState({ systolic: '', diastolic: '', heartRate: '', bloodSugar: '' });
   const [prescriptionLoading, setPrescriptionLoading] = useState(false);
+  const [emergencyRequestLoading, setEmergencyRequestLoading] = useState({});
+  const [emergencyRequestMessage, setEmergencyRequestMessage] = useState('');
   const [prescriptionRecords, setPrescriptionRecords] = useState([]);
   const [prescriptionFilters, setPrescriptionFilters] = useState({
     fromDate: '',
@@ -137,6 +139,20 @@ const PatientDashboard = () => {
       await loadMonitoring();
     } catch (error) {
       console.error('Failed to save vitals:', error);
+    }
+  };
+
+  const requestEmergencyPrePack = async (appointmentId) => {
+    try {
+      setEmergencyRequestMessage('');
+      setEmergencyRequestLoading((prev) => ({ ...prev, [appointmentId]: true }));
+      await appointmentsAPI.sendPrescriptionToPharmacy(appointmentId, { emergencyPrePack: true });
+      setEmergencyRequestMessage('Emergency pre-pack request sent to pharmacy successfully.');
+      await loadData();
+    } catch (error) {
+      setEmergencyRequestMessage(error?.message || 'Failed to send emergency pre-pack request.');
+    } finally {
+      setEmergencyRequestLoading((prev) => ({ ...prev, [appointmentId]: false }));
     }
   };
 
@@ -509,6 +525,12 @@ const PatientDashboard = () => {
         <span className="text-sm text-gray-500">{data.appointments.length} appointments</span>
       </div>
 
+      {emergencyRequestMessage && (
+        <div className="px-4 py-2 border-b border-gray-200 text-sm text-blue-700 bg-blue-50">
+          {emergencyRequestMessage}
+        </div>
+      )}
+
       {data.appointments.length === 0 ? (
         <div className="p-6 text-center text-gray-500">No appointments found.</div>
       ) : (
@@ -567,6 +589,19 @@ const PatientDashboard = () => {
                       </a>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {(appointment?.prescription?.medicines?.length > 0 || appointment?.prescriptionFiles?.length > 0) && !['cancelled', 'no_show'].includes(appointment?.status) && (
+                <div className="pt-1">
+                  <Link to={`/appointments/send-to-pharmacy?appointmentId=${appointment._id}`}>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                    >
+                      Choose Nearby Pharmacy
+                    </Button>
+                  </Link>
                 </div>
               )}
 

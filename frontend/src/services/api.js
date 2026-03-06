@@ -306,7 +306,11 @@ export const appointmentsAPI = {
   updateStatus: (id, status) => API.patch(`/appointments/${id}/status`, { status }),
   startVideoConsultation: (id) => API.post(`/appointments/${id}/video/start`),
   addPrescription: (id, prescriptionData) => API.post(`/appointments/${id}/prescription`, prescriptionData),
+  sendPrescriptionToPharmacy: (id, payload = {}) => API.post(`/appointments/${id}/prescription/send-to-pharmacy`, payload),
+  getPharmacyOrderStatus: (id) => API.get(`/appointments/${id}/pharmacy-order-status`),
+  getNearbyPharmacists: (id) => API.get(`/appointments/${id}/nearby-pharmacists`),
   addDiagnosis: (id, diagnosisData) => API.patch(`/appointments/${id}/diagnosis`, diagnosisData),
+  analyzeLabReport: (labReport) => API.post('/appointments/lab-report/analyze', { labReport }),
   updateConsultation: (id, consultationData) => API.patch(`/appointments/${id}/consultation`, consultationData),
   getStats: () => API.get('/appointments/stats/overview'),
 };

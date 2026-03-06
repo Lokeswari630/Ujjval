@@ -64,7 +64,7 @@ class NLPHealthService {
           /dermatologist|skin|rash|acne/i,
           /gynecologist|women|pregnant/i,
           /psychiatrist|mental|depression|anxiety/i,
-          /ent|ear|nose|throat/i,
+          /\b(ent|ear|nose|throat)\b/i,
           /ophthalmologist|eye|vision/i,
           /dentist|dental|tooth/i
         ],
@@ -76,7 +76,7 @@ class NLPHealthService {
           'dermatologist|skin|rash|acne': 'Dermatology',
           'gynecologist|women|pregnant': 'Gynecology',
           'psychiatrist|mental|depression|anxiety': 'Psychiatry',
-          'ent|ear|nose|throat': 'ENT',
+          '\\b(ent|ear|nose|throat)\\b': 'ENT',
           'ophthalmologist|eye|vision': 'Ophthalmology',
           'dentist|dental|tooth': 'Dentistry'
         }

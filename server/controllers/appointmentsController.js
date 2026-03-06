@@ -1,5 +1,131 @@
 const Appointment = require('../models/Appointment');
 const Doctor = require('../models/Doctor');
+const User = require('../models/User');
+const PharmacyOrder = require('../models/PharmacyOrder');
+const pharmacyManager = require('../services/pharmacyManager-enhanced');
+const medicalReportExplainer = require('../services/medicalReportExplainer');
+
+const normalizeAddressValue = (value) => String(value || '').trim().toLowerCase();
+
+const buildNearbyPharmacists = (patientAddress, pharmacists) => {
+  const patientCity = normalizeAddressValue(patientAddress?.city);
+  const patientState = normalizeAddressValue(patientAddress?.state);
+  const patientZip = normalizeAddressValue(patientAddress?.zipCode);
+
+  return (Array.isArray(pharmacists) ? pharmacists : [])
+    .map((pharmacist) => {
+      const city = normalizeAddressValue(pharmacist?.address?.city);
+      const state = normalizeAddressValue(pharmacist?.address?.state);
+      const zip = normalizeAddressValue(pharmacist?.address?.zipCode);
+
+      let score = 0;
+      if (patientState && state && patientState === state) score += 4;
+      if (patientCity && city && patientCity === city) score += 5;
+      if (patientZip && zip && patientZip === zip) score += 3;
+
+      const matchLabel = score >= 9
+        ? 'very_nearby'
+        : score >= 4
+          ? 'nearby'
+          : 'other_location';
+
+      return {
+        _id: pharmacist._id,
+        name: pharmacist.name,
+        email: pharmacist.email,
+        phone: pharmacist.phone,
+        address: pharmacist.address || {},
+        matchScore: score,
+        matchLabel
+      };
+    })
+    .sort((a, b) => b.matchScore - a.matchScore || String(a.name || '').localeCompare(String(b.name || '')));
+};
+
+const decodeDataUriText = (dataUri) => {
+  const raw = String(dataUri || '').trim();
+  if (!raw.startsWith('data:')) return '';
+
+  const commaIndex = raw.indexOf(',');
+  if (commaIndex === -1) return '';
+
+  const metadata = raw.slice(5, commaIndex).toLowerCase();
+  const payload = raw.slice(commaIndex + 1);
+  const isText = metadata.includes('text/plain');
+  if (!isText) return '';
+
+  try {
+    if (metadata.includes(';base64')) {
+      return Buffer.from(payload, 'base64').toString('utf8').trim();
+    }
+
+    return decodeURIComponent(payload).trim();
+  } catch (error) {
+    return '';
+  }
+};
+
+const getLabReportTextForAnalysis = (labReport) => {
+  const reportText = String(labReport?.reportText || '').trim();
+  if (reportText) return reportText;
+
+  const decodedText = decodeDataUriText(labReport?.fileData);
+  if (decodedText) return decodedText;
+
+  const notes = String(labReport?.notes || '').trim();
+  const title = String(labReport?.title || '').trim();
+  const fileName = String(labReport?.fileName || '').trim();
+
+  return [title, notes, fileName].filter(Boolean).join(' ').trim();
+};
+
+const analyzeLabReportUpload = async (req, res, next) => {
+  try {
+    const incomingLabReport = req.body?.labReport && typeof req.body.labReport === 'object'
+      ? req.body.labReport
+      : {};
+
+    const hasFile = Boolean(String(incomingLabReport.fileData || '').trim() || String(incomingLabReport.fileUrl || '').trim());
+    const analysisText = getLabReportTextForAnalysis(incomingLabReport);
+
+    if (!hasFile && !analysisText) {
+      return res.status(400).json({
+        success: false,
+        message: 'Upload a lab report file or provide reportText for analysis'
+      });
+    }
+
+    if (!analysisText || analysisText.length < 5) {
+      return res.status(200).json({
+        success: true,
+        message: 'Lab report uploaded, but infection estimate needs readable report text for better accuracy.',
+        data: {
+          infectionAssessment: {
+            percentage: null,
+            confidence: 0.2,
+            riskLevel: 'low',
+            summary: 'No readable report text detected from upload. Add report text or notes for infection percentage estimation.'
+          }
+        }
+      });
+    }
+
+    const explanation = await medicalReportExplainer.explain(analysisText);
+
+    res.status(200).json({
+      success: true,
+      message: 'Lab report analysis completed successfully',
+      data: {
+        infectionAssessment: explanation?.infectionAssessment || null,
+        overallRisk: explanation?.overallRisk || 'low',
+        extracted: explanation?.extracted || [],
+        summary: explanation?.summary || ''
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 const getAppointments = async (req, res, next) => {
   try {
@@ -506,7 +632,6 @@ const addPrescription = async (req, res, next) => {
 
     if (appointment.prescription && appointment.prescription.medicines.length > 0) {
       try {
-        const pharmacyManager = require('../services/pharmacyManager');
         await pharmacyManager.createOrderFromPrescription(appointment._id);
       } catch (error) {
         console.error('Error creating pharmacy order:', error);
@@ -521,6 +646,227 @@ const addPrescription = async (req, res, next) => {
       success: true,
       message: 'Prescription added successfully',
       data: updatedAppointment
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const sendPrescriptionToPharmacyEmergency = async (req, res, next) => {
+  try {
+    const preferredPharmacistId = String(req.body?.preferredPharmacistId || '').trim();
+
+    const appointment = await Appointment.findById(req.params.id);
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+
+    if (req.user.role === 'patient') {
+      if (appointment.patientId.toString() !== req.user.id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
+    } else if (req.user.role === 'doctor') {
+      const doctor = await Doctor.findOne({ userId: req.user.id }).select('_id');
+      if (!doctor || appointment.doctorId.toString() !== doctor._id.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
+    } else {
+      return res.status(403).json({
+        success: false,
+        message: 'Only doctor or patient can send prescription to pharmacy'
+      });
+    }
+
+    const medicines = appointment?.prescription?.medicines || [];
+    const prescriptionFiles = appointment?.prescriptionFiles || [];
+    const hasStructuredMedicines = Array.isArray(medicines) && medicines.length > 0;
+    const hasPrescriptionImage = Array.isArray(prescriptionFiles) && prescriptionFiles.length > 0;
+
+    if (!hasStructuredMedicines && !hasPrescriptionImage) {
+      return res.status(400).json({
+        success: false,
+        message: 'Doctor must add medicine list or upload prescription image before emergency pre-pack request'
+      });
+    }
+
+    let resolvedPharmacistId;
+    let resolvedPharmacistName = '';
+    if (preferredPharmacistId) {
+      const pharmacist = await User.findOne({
+        _id: preferredPharmacistId,
+        role: 'pharmacist',
+        isActive: true
+      }).select('_id name');
+
+      if (!pharmacist) {
+        return res.status(400).json({
+          success: false,
+          message: 'Selected pharmacist is not available'
+        });
+      }
+
+      resolvedPharmacistId = pharmacist._id;
+      resolvedPharmacistName = String(pharmacist.name || '').trim();
+    }
+
+    if (!resolvedPharmacistId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please select a pharmacy before sending the prescription'
+      });
+    }
+
+    const order = await pharmacyManager.createOrderFromPrescription(appointment._id, {
+      emergencyPrePack: true,
+      allowImageOnlyPrescription: true,
+      preferredPharmacistId: resolvedPharmacistId,
+      requestedBy: req.user.id,
+      requestedByRole: req.user.role
+    });
+
+    res.status(200).json({
+      success: true,
+      message: resolvedPharmacistName
+        ? `Emergency pre-pack request sent to ${resolvedPharmacistName}. Medicines will be prepared on priority before arrival.`
+        : 'Emergency pre-pack request sent to pharmacy. Medicines will be prepared on priority before arrival.',
+      data: order
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getNearbyPharmacistsForAppointment = async (req, res, next) => {
+  try {
+    const appointment = await Appointment.findById(req.params.id)
+      .populate('patientId', 'name address')
+      .populate({ path: 'doctorId', select: 'userId' });
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+
+    if (req.user.role === 'patient') {
+      if (appointment.patientId?._id?.toString() !== req.user.id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
+    } else if (req.user.role === 'doctor') {
+      const doctor = await Doctor.findOne({ userId: req.user.id }).select('_id');
+      if (!doctor || appointment.doctorId?._id?.toString() !== doctor._id.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
+    } else {
+      return res.status(403).json({
+        success: false,
+        message: 'Only patient or doctor can view nearby pharmacists for this appointment'
+      });
+    }
+
+    const pharmacists = await User.find({
+      role: 'pharmacist',
+      isActive: true
+    })
+      .select('name email phone address')
+      .lean();
+
+    const nearby = buildNearbyPharmacists(appointment?.patientId?.address || {}, pharmacists);
+
+    res.status(200).json({
+      success: true,
+      message: nearby.length > 0 ? 'Nearby pharmacists fetched successfully' : 'No pharmacists available right now',
+      data: {
+        appointmentId: appointment._id,
+        patientAddress: appointment?.patientId?.address || {},
+        pharmacists: nearby
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getPharmacyOrderStatusForAppointment = async (req, res, next) => {
+  try {
+    const appointment = await Appointment.findById(req.params.id);
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+
+    if (req.user.role === 'patient') {
+      if (appointment.patientId.toString() !== req.user.id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
+    } else if (req.user.role === 'doctor') {
+      const doctor = await Doctor.findOne({ userId: req.user.id }).select('_id');
+      if (!doctor || appointment.doctorId.toString() !== doctor._id.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
+    } else {
+      return res.status(403).json({
+        success: false,
+        message: 'Only doctor or patient can view pharmacy order status for this appointment'
+      });
+    }
+
+    const order = await PharmacyOrder.findOne({
+      prescriptionId: appointment._id,
+      status: { $ne: 'cancelled' }
+    })
+      .populate('assignedPharmacist', 'name')
+      .sort({ createdAt: -1 });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'No pharmacy order found yet for this appointment'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Pharmacy order status fetched successfully',
+      data: {
+        orderId: order.orderId,
+        status: order.status,
+        statusMessage: ['completed', 'ready'].includes(order.status)
+          ? 'The medicines are packed..came and take the order.'
+          : null,
+        priority: order.priority,
+        emergencyPrePack: Boolean(order.emergencyPrePack),
+        assignedPharmacist: order.assignedPharmacist?.name || 'Not assigned yet',
+        estimatedReadyTime: order.estimatedReadyTime,
+        actualReadyTime: order.actualReadyTime,
+        updatedAt: order.updatedAt
+      }
     });
   } catch (error) {
     next(error);
@@ -648,6 +994,26 @@ const updateConsultationDetails = async (req, res, next) => {
     }
 
     if (hasLabReport) {
+      const reportText = getLabReportTextForAnalysis(labReport);
+      let infectionAnalysis;
+
+      if (reportText && reportText.length >= 5) {
+        try {
+          const explanation = await medicalReportExplainer.explain(reportText);
+          if (explanation?.infectionAssessment) {
+            infectionAnalysis = {
+              percentage: explanation.infectionAssessment.percentage,
+              confidence: explanation.infectionAssessment.confidence,
+              riskLevel: explanation.infectionAssessment.riskLevel,
+              summary: explanation.infectionAssessment.summary,
+              analyzedAt: new Date()
+            };
+          }
+        } catch (error) {
+          // Continue saving uploaded report even if AI analysis fails.
+        }
+      }
+
       appointment.labReports.push({
         title: String(labReport.title || '').trim(),
         fileName: String(labReport.fileName || '').trim(),
@@ -655,6 +1021,7 @@ const updateConsultationDetails = async (req, res, next) => {
         fileUrl: String(labReport.fileUrl || '').trim(),
         mimeType: String(labReport.mimeType || '').trim(),
         notes: String(labReport.notes || '').trim(),
+        infectionAnalysis,
         uploadedAt: new Date(),
         uploadedBy: req.user.id
       });
@@ -681,7 +1048,6 @@ const updateConsultationDetails = async (req, res, next) => {
 
     if (appointment.prescription?.medicines?.length > 0) {
       try {
-        const pharmacyManager = require('../services/pharmacyManager');
         await pharmacyManager.createOrderFromPrescription(appointment._id);
       } catch (error) {
         console.error('Error creating pharmacy order:', error);
@@ -902,6 +1268,10 @@ module.exports = {
   updateAppointmentStatus,
   startVideoConsultation,
   addPrescription,
+  sendPrescriptionToPharmacyEmergency,
+  getPharmacyOrderStatusForAppointment,
+  getNearbyPharmacistsForAppointment,
+  analyzeLabReportUpload,
   addDiagnosis,
   updateConsultationDetails,
   rateAppointment,

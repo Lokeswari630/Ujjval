@@ -109,6 +109,7 @@ const initialConsultationForm = {
   prescriptionFileName: '',
   prescriptionFileType: '',
   labReportTitle: '',
+  labReportText: '',
   labReportFileData: '',
   labReportFileName: '',
   labReportFileType: ''
@@ -129,6 +130,7 @@ const Appointments = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [actionMessage, setActionMessage] = useState('');
   const [bookForm, setBookForm] = useState(initialBookForm);
   const [showBookForm, setShowBookForm] = useState(false);
   const [doctorsInfoMessage, setDoctorsInfoMessage] = useState('');
@@ -144,6 +146,8 @@ const Appointments = () => {
   const [selectedPaymentRequest, setSelectedPaymentRequest] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
   const [consultationForm, setConsultationForm] = useState(initialConsultationForm);
+  const [labReportAnalysis, setLabReportAnalysis] = useState(null);
+  const [labReportAnalyzing, setLabReportAnalyzing] = useState(false);
 
   const isPatient = user?.role === 'patient';
   const isDoctor = user?.role === 'doctor';
@@ -418,6 +422,7 @@ const Appointments = () => {
     event.preventDefault();
     setSubmitting(true);
     setError('');
+    setActionMessage('');
 
     try {
       await appointmentsAPI.create({
@@ -449,12 +454,74 @@ const Appointments = () => {
   const updateStatus = async (appointmentId, status) => {
     setSubmitting(true);
     setError('');
+    setActionMessage('');
 
     try {
       await appointmentsAPI.updateStatus(appointmentId, status);
       await loadAppointments();
     } catch (statusError) {
       setError(statusError?.message || 'Failed to update appointment status');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const sendToPharmacyEmergency = async (appointmentId) => {
+    setSubmitting(true);
+    setError('');
+    setActionMessage('');
+
+    try {
+      const response = await appointmentsAPI.sendPrescriptionToPharmacy(appointmentId, {
+        emergencyPrePack: true
+      });
+      const successMessage = response?.message || 'Emergency pre-pack request sent to pharmacy successfully.';
+      setActionMessage(successMessage);
+      window.alert(successMessage);
+      await loadAppointments();
+    } catch (sendError) {
+      const failMessage = sendError?.message || 'Failed to send emergency pre-pack request';
+      setError(failMessage);
+      window.alert(failMessage);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const viewPharmacyOrderStatus = async (appointmentId) => {
+    setSubmitting(true);
+    setError('');
+    setActionMessage('');
+
+    try {
+      const response = await appointmentsAPI.getPharmacyOrderStatus(appointmentId);
+      const order = response?.data || {};
+      const normalizedStatus = String(order.status || '').toLowerCase();
+      const pickupInstruction = ['completed', 'ready'].includes(normalizedStatus)
+        ? (order.statusMessage || 'The medicines are packed..came and take the order.')
+        : null;
+
+      const details = [
+        `Order ID: ${order.orderId || '-'}`,
+        `Status: ${order.status || '-'}`,
+        pickupInstruction ? `Message: ${pickupInstruction}` : null,
+        `Priority: ${order.priority || '-'}`,
+        `Emergency Pre-Pack: ${order.emergencyPrePack ? 'Yes' : 'No'}`,
+        `Assigned Pharmacist: ${order.assignedPharmacist || 'Not assigned yet'}`,
+        `Estimated Ready Time: ${order.estimatedReadyTime ? new Date(order.estimatedReadyTime).toLocaleString() : 'Not available yet'}`,
+        `Last Updated: ${order.updatedAt ? new Date(order.updatedAt).toLocaleString() : '-'}`
+      ].filter(Boolean).join('\n');
+
+      setActionMessage('Pharmacy order status fetched successfully.');
+      window.alert(details);
+
+      if (normalizedStatus === 'completed' && pickupInstruction) {
+        window.alert(pickupInstruction);
+      }
+    } catch (statusError) {
+      const failMessage = statusError?.message || 'Unable to fetch pharmacy order status right now.';
+      setError(failMessage);
+      window.alert(failMessage);
     } finally {
       setSubmitting(false);
     }
@@ -476,6 +543,7 @@ const Appointments = () => {
   const openConsultationWorkspace = async (appointment, markInProgress = false) => {
     setSubmitting(true);
     setError('');
+    setActionMessage('');
 
     try {
       if (markInProgress) {
@@ -487,11 +555,40 @@ const Appointments = () => {
 
       setSelectedAppointment(currentAppointment);
       setConsultationForm(mapAppointmentToConsultationForm(currentAppointment));
+      setLabReportAnalysis(null);
       await loadAppointments();
     } catch (workspaceError) {
       setError(workspaceError?.message || 'Failed to open prescription workspace');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const analyzeLabReportFromForm = async (draft) => {
+    const payload = {
+      title: String(draft?.labReportTitle || '').trim(),
+      fileName: String(draft?.labReportFileName || '').trim(),
+      fileData: String(draft?.labReportFileData || '').trim(),
+      mimeType: String(draft?.labReportFileType || '').trim(),
+      reportText: String(draft?.labReportText || '').trim()
+    };
+
+    if (!payload.fileData && !payload.reportText) {
+      setError('Upload a lab report file or add report text before infection analysis.');
+      return;
+    }
+
+    setLabReportAnalyzing(true);
+    setError('');
+
+    try {
+      const response = await appointmentsAPI.analyzeLabReport(payload);
+      setLabReportAnalysis(response?.data || null);
+    } catch (analysisError) {
+      setLabReportAnalysis(null);
+      setError(analysisError?.message || 'Failed to analyze infection percentage from lab report');
+    } finally {
+      setLabReportAnalyzing(false);
     }
   };
 
@@ -505,17 +602,28 @@ const Appointments = () => {
         labReportFileName: '',
         labReportFileType: ''
       }));
+      setLabReportAnalysis(null);
       return;
     }
 
     const reader = new FileReader();
     reader.onload = () => {
+      const nextData = typeof reader.result === 'string' ? reader.result : '';
+      const nextDraft = {
+        ...consultationForm,
+        labReportFileData: nextData,
+        labReportFileName: file.name,
+        labReportFileType: file.type || ''
+      };
+
       setConsultationForm((prev) => ({
         ...prev,
-        labReportFileData: typeof reader.result === 'string' ? reader.result : '',
+        labReportFileData: nextData,
         labReportFileName: file.name,
         labReportFileType: file.type || ''
       }));
+
+      analyzeLabReportFromForm(nextDraft);
     };
     reader.readAsDataURL(file);
   };
@@ -564,6 +672,7 @@ const Appointments = () => {
 
     setSubmitting(true);
     setError('');
+    setActionMessage('');
 
     try {
       const hasPrescriptionFile = Boolean(consultationForm.prescriptionFileData);
@@ -586,6 +695,7 @@ const Appointments = () => {
         labReport: hasLabReport
           ? {
             title: consultationForm.labReportTitle.trim(),
+            reportText: consultationForm.labReportText.trim(),
             fileName: consultationForm.labReportFileName,
             fileData: consultationForm.labReportFileData,
             mimeType: consultationForm.labReportFileType
@@ -595,6 +705,8 @@ const Appointments = () => {
 
       setSelectedAppointment(null);
       setConsultationForm(initialConsultationForm);
+      setLabReportAnalysis(null);
+      setActionMessage('Prescription/lab report saved successfully.');
       await loadAppointments();
     } catch (saveError) {
       setError(saveError?.message || 'Failed to save prescription image or lab report');
@@ -602,6 +714,15 @@ const Appointments = () => {
       setSubmitting(false);
     }
   };
+
+  const canSendSelectedAppointmentEmergency =
+    Boolean(selectedAppointment?._id) &&
+    !['cancelled', 'no_show'].includes(selectedAppointment?.status) &&
+    (
+      (selectedAppointment?.prescription?.medicines?.length || 0) > 0 ||
+      (selectedAppointment?.prescriptionFiles?.length || 0) > 0 ||
+      Boolean(consultationForm?.prescriptionFileData)
+    );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -629,6 +750,12 @@ const Appointments = () => {
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
             {error}
+          </div>
+        )}
+
+        {actionMessage && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700">
+            {actionMessage}
           </div>
         )}
 
@@ -937,30 +1064,43 @@ const Appointments = () => {
                           </div>
                         </div>
                       )}
+                      {appointment?.prescriptionFiles?.length > 0 && !appointment?.prescription?.medicines?.length && (
+                        <p className="text-sm text-emerald-700">
+                          Prescription image uploaded. You can send emergency pre-pack request and pharmacist will verify medicines from this image.
+                        </p>
+                      )}
                       {appointment?.labReports?.length > 0 && (
                         <div className="text-sm text-gray-700">
                           <p className="font-medium">Lab Reports:</p>
                           <div className="mt-1 space-y-1">
                             {appointment.labReports.map((report, reportIndex) => (
-                              <a
-                                key={`${appointment._id}-report-${reportIndex}`}
-                                href={report.fileUrl || report.fileData}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="block text-blue-700 underline"
-                              >
-                                {report.title || report.fileName || `Lab Report ${reportIndex + 1}`}
-                              </a>
+                              <div key={`${appointment._id}-report-${reportIndex}`} className="rounded border border-gray-100 p-2">
+                                <a
+                                  href={report.fileUrl || report.fileData}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="block text-blue-700 underline"
+                                >
+                                  {report.title || report.fileName || `Lab Report ${reportIndex + 1}`}
+                                </a>
+                                {typeof report?.infectionAnalysis?.percentage === 'number' && (
+                                  <p className="mt-1 text-xs text-rose-700">
+                                    Infection likelihood: {report.infectionAnalysis.percentage}% ({report.infectionAnalysis.riskLevel || 'risk unknown'})
+                                  </p>
+                                )}
+                              </div>
                             ))}
                           </div>
                         </div>
                       )}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                        {appointment.status}
+                    <div className="flex flex-col items-start gap-2 sm:items-end sm:min-w-[18rem]">
+                      <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 capitalize">
+                        {String(appointment.status || '').replace('_', ' ')}
                       </span>
+
+                      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
 
                       {isPatient && ['payment_submitted', 'scheduled'].includes(appointment.status) && (
                         <Button
@@ -1031,6 +1171,29 @@ const Appointments = () => {
                           Prescription
                         </Button>
                       )}
+
+                      {(isPatient || isDoctor) && (appointment?.prescription?.medicines?.length > 0 || appointment?.prescriptionFiles?.length > 0) && !['cancelled', 'no_show'].includes(appointment.status) && (
+                        <Link to={`/appointments/send-to-pharmacy?appointmentId=${appointment._id}`}>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                          >
+                            Choose Pharmacy & Send
+                          </Button>
+                        </Link>
+                      )}
+
+                      {(isPatient || isDoctor) && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => viewPharmacyOrderStatus(appointment._id)}
+                          loading={submitting}
+                        >
+                          View Order Status
+                        </Button>
+                      )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1045,6 +1208,7 @@ const Appointments = () => {
         onClose={() => {
           setSelectedAppointment(null);
           setConsultationForm(initialConsultationForm);
+          setLabReportAnalysis(null);
         }}
         title="Upload Prescription"
       >
@@ -1108,6 +1272,16 @@ const Appointments = () => {
               placeholder="CBC Report"
             />
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Report Text (recommended for better AI accuracy)</label>
+              <textarea
+                value={consultationForm.labReportText}
+                onChange={(event) => setConsultationForm((prev) => ({ ...prev, labReportText: event.target.value }))}
+                rows={4}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Paste key values (example: WBC 16000, CRP 35, ESR 45...)"
+              />
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Upload Lab Report</label>
               <input
                 type="file"
@@ -1119,9 +1293,37 @@ const Appointments = () => {
                 <p className="mt-1 text-xs text-gray-600">Selected: {consultationForm.labReportFileName}</p>
               )}
             </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => analyzeLabReportFromForm(consultationForm)}
+                loading={labReportAnalyzing}
+              >
+                Analyze Infection %
+              </Button>
+              {labReportAnalysis?.infectionAssessment?.percentage !== null && labReportAnalysis?.infectionAssessment?.percentage !== undefined && (
+                <p className="text-sm text-rose-700 font-medium">
+                  Infection likelihood: {labReportAnalysis.infectionAssessment.percentage}%
+                </p>
+              )}
+            </div>
+            {labReportAnalysis?.infectionAssessment?.summary && (
+              <p className="text-xs text-gray-600">{labReportAnalysis.infectionAssessment.summary}</p>
+            )}
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
+            {isDoctor && canSendSelectedAppointmentEmergency && (
+              <Link to={`/appointments/send-to-pharmacy?appointmentId=${selectedAppointment._id}`}>
+                <Button
+                  type="button"
+                  variant="danger"
+                >
+                  Choose Pharmacy & Send
+                </Button>
+              </Link>
+            )}
             <Button
               type="button"
               variant="outline"

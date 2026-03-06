@@ -6,11 +6,104 @@ const NLPQueryHistory = require('../models/NLPQueryHistory');
 const User = require('../models/User');
 const aiHealthPredictor = require('../services/aiHealthPredictor');
 
+const STOP_WORDS = new Set([
+  'i', 'me', 'my', 'mine', 'we', 'our', 'you', 'your', 'yours',
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'being', 'been',
+  'to', 'for', 'of', 'on', 'in', 'at', 'by', 'with', 'from', 'as',
+  'and', 'or', 'but', 'if', 'then', 'so', 'than', 'that', 'this',
+  'please', 'kindly', 'can', 'could', 'would', 'should', 'want', 'need', 'help'
+]);
+
+const DOCTOR_SPECIALIZATION_RULES = [
+  { pattern: /cardiologist|cardiology|heart/i, value: 'Cardiology' },
+  { pattern: /neurologist|neurology|brain|migraine|headache/i, value: 'Neurology' },
+  { pattern: /orthopedic|orthopaedic|orthopedics|bone|joint|fracture/i, value: 'Orthopedics' },
+  { pattern: /pediatrician|pediatrics|child|baby|kid/i, value: 'Pediatrics' },
+  { pattern: /dermatologist|dermatology|skin|rash|acne/i, value: 'Dermatology' },
+  { pattern: /gynecologist|gynecology|pregnan|women/i, value: 'Gynecology' },
+  { pattern: /psychiatrist|psychiatry|mental|anxiety|depression/i, value: 'Psychiatry' },
+  { pattern: /\b(ent|ear|nose|throat)\b/i, value: 'ENT' },
+  { pattern: /ophthalmologist|ophthalmology|eye|vision/i, value: 'Ophthalmology' },
+  { pattern: /dentist|dentistry|dental|tooth/i, value: 'Dentistry' },
+  { pattern: /urologist|urology/i, value: 'Urology' },
+  { pattern: /gastroenterologist|gastroenterology|stomach|gastric/i, value: 'Gastroenterology' },
+  { pattern: /endocrinologist|endocrinology|thyroid|hormone|diabetes/i, value: 'Endocrinology' },
+  { pattern: /pulmonologist|pulmonology|lung|breath|respiratory/i, value: 'Pulmonology' },
+  { pattern: /nephrologist|nephrology|kidney/i, value: 'Nephrology' },
+  { pattern: /rheumatologist|rheumatology|arthritis/i, value: 'Rheumatology' },
+  { pattern: /oncologist|oncology|cancer/i, value: 'Oncology' },
+  { pattern: /anesthesiologist|anesthesiology/i, value: 'Anesthesiology' },
+  { pattern: /radiologist|radiology|scan|xray|x-ray/i, value: 'Radiology' },
+  { pattern: /general physician|general doctor|general medicine/i, value: 'General Medicine' }
+];
+
+const preprocessQuery = (rawQuery) => {
+  const original = String(rawQuery || '').trim();
+  const normalized = original.toLowerCase().replace(/[^a-z0-9\s:/-]/g, ' ').replace(/\s+/g, ' ').trim();
+  const tokens = normalized ? normalized.split(' ') : [];
+  const filteredTokens = tokens.filter((token) => token && !STOP_WORDS.has(token));
+
+  return {
+    original,
+    normalized,
+    tokens,
+    filteredTokens
+  };
+};
+
+const extractDoctorTypeFromQuery = (normalizedQuery) => {
+  for (const rule of DOCTOR_SPECIALIZATION_RULES) {
+    if (rule.pattern.test(normalizedQuery)) {
+      return rule.value;
+    }
+  }
+  return null;
+};
+
+const extractDateEntity = (normalizedQuery) => {
+  if (/\btoday\b/i.test(normalizedQuery)) return 'today';
+  if (/\btomorrow\b/i.test(normalizedQuery)) return 'tomorrow';
+  if (/\bday after tomorrow\b/i.test(normalizedQuery)) return 'day_after_tomorrow';
+  if (/\bnext week\b/i.test(normalizedQuery)) return 'next_week';
+  if (/\bthis week\b/i.test(normalizedQuery)) return 'this_week';
+
+  const numericDate = normalizedQuery.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+  if (numericDate) return numericDate[0];
+
+  const textualDate = normalizedQuery.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december)\b/i);
+  if (textualDate) return textualDate[0];
+
+  return null;
+};
+
+const parseRelativeDate = (dateEntity) => {
+  const today = new Date();
+  today.setHours(10, 0, 0, 0);
+
+  if (!dateEntity) return null;
+
+  if (dateEntity === 'today') return today;
+  if (dateEntity === 'tomorrow') {
+    const next = new Date(today);
+    next.setDate(next.getDate() + 1);
+    return next;
+  }
+  if (dateEntity === 'day_after_tomorrow') {
+    const next = new Date(today);
+    next.setDate(next.getDate() + 2);
+    return next;
+  }
+
+  const parsed = new Date(dateEntity);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
 const roleSuggestions = {
   patient: [
     'Go to my appointments page',
     'Open my profile page',
     'Show my upcoming appointments',
+    'Book appointment with cardiologist tomorrow',
     'I have fever and cough, what should I do at home?'
   ],
   doctor: [
@@ -52,15 +145,35 @@ const extractSymptomsFromQuery = (rawQuery) => {
 };
 
 const parseIntent = (rawQuery) => {
-  const query = String(rawQuery || '').trim().toLowerCase();
+  const pipeline = preprocessQuery(rawQuery);
+  const query = pipeline.normalized;
 
   const has = (terms) => terms.some((term) => query.includes(term));
+
+  const bookingIntentDetected = has(['book', 'schedule', 'appointment', 'consult', 'meet doctor', 'see doctor']);
+  if (bookingIntentDetected) {
+    const doctorType = extractDoctorTypeFromQuery(query);
+    const date = extractDateEntity(query);
+    const symptoms = extractSymptomsFromQuery(query);
+
+    return {
+      intent: 'appointments.book',
+      confidence: doctorType ? 0.93 : 0.78,
+      entities: {
+        doctorType,
+        date,
+        symptoms
+      },
+      pipeline
+    };
+  }
 
   if (has(['go to', 'open', 'navigate', 'take me', 'dashboard', 'profile page', 'appointments page'])) {
     return {
       intent: 'navigation.route',
       confidence: 0.9,
-      entities: {}
+      entities: {},
+      pipeline
     };
   }
 
@@ -70,7 +183,8 @@ const parseIntent = (rawQuery) => {
       confidence: 0.86,
       entities: {
         scope: has(['upcoming']) ? 'upcoming' : has(["today", "today's"]) ? 'today' : 'all'
-      }
+      },
+      pipeline
     };
   }
 
@@ -78,7 +192,8 @@ const parseIntent = (rawQuery) => {
     return {
       intent: 'users.listPatients',
       confidence: 0.91,
-      entities: {}
+      entities: {},
+      pipeline
     };
   }
 
@@ -86,7 +201,8 @@ const parseIntent = (rawQuery) => {
     return {
       intent: 'inventory.lowStock',
       confidence: 0.89,
-      entities: {}
+      entities: {},
+      pipeline
     };
   }
 
@@ -94,7 +210,8 @@ const parseIntent = (rawQuery) => {
     return {
       intent: 'prescriptions.today',
       confidence: 0.84,
-      entities: {}
+      entities: {},
+      pipeline
     };
   }
 
@@ -102,7 +219,8 @@ const parseIntent = (rawQuery) => {
     return {
       intent: 'predictions.latest',
       confidence: 0.9,
-      entities: {}
+      entities: {},
+      pipeline
     };
   }
 
@@ -113,14 +231,71 @@ const parseIntent = (rawQuery) => {
       confidence: symptoms.length > 0 ? 0.88 : 0.72,
       entities: {
         symptoms
-      }
+      },
+      pipeline
     };
   }
 
   return {
     intent: 'unknown',
     confidence: 0.35,
-    entities: {}
+    entities: {},
+    pipeline
+  };
+};
+
+const isLikelyBookingFollowUp = (rawQuery, pipeline) => {
+  const normalized = pipeline?.normalized || String(rawQuery || '').toLowerCase();
+  const tokenCount = Array.isArray(pipeline?.filteredTokens)
+    ? pipeline.filteredTokens.length
+    : (normalized ? normalized.split(/\s+/).filter(Boolean).length : 0);
+
+  const hasBookingSignal = /\b(book|booking|schedule|appointment|consult)\b/i.test(normalized);
+  const hasAffirmationSignal = /\b(yes|yeah|yep|ok|okay|sure|confirm|confirmed|proceed|go ahead|do it)\b/i.test(normalized);
+
+  // Restrict context carry-over to short confirmation-like utterances.
+  return tokenCount > 0 && tokenCount <= 8 && hasBookingSignal && hasAffirmationSignal;
+};
+
+const hydrateBookingEntitiesFromHistory = async (parsed, user, rawQuery) => {
+  if (parsed.intent !== 'appointments.book') return parsed;
+
+  const needsDoctorType = !parsed?.entities?.doctorType;
+  const needsDate = !parsed?.entities?.date;
+
+  if (!needsDoctorType && !needsDate) return parsed;
+  if (!isLikelyBookingFollowUp(rawQuery, parsed.pipeline)) return parsed;
+
+  const recentBookingContext = await NLPQueryHistory.findOne({
+    userId: user.id,
+    intent: 'appointments.book',
+    success: true,
+    'entities.doctorType': { $exists: true, $ne: null }
+  })
+    .sort({ createdAt: -1 })
+    .select('entities')
+    .lean();
+
+  if (!recentBookingContext?.entities) return parsed;
+
+  const mergedEntities = {
+    ...parsed.entities,
+    doctorType: parsed.entities?.doctorType || recentBookingContext.entities?.doctorType || null,
+    date: parsed.entities?.date || recentBookingContext.entities?.date || null,
+    symptoms: Array.isArray(parsed.entities?.symptoms) && parsed.entities.symptoms.length > 0
+      ? parsed.entities.symptoms
+      : recentBookingContext.entities?.symptoms || []
+  };
+
+  return {
+    ...parsed,
+    confidence: mergedEntities.doctorType ? Math.max(parsed.confidence || 0, 0.9) : parsed.confidence,
+    entities: mergedEntities,
+    pipeline: {
+      ...parsed.pipeline,
+      contextHydrated: true,
+      contextSource: 'recent_booking_history'
+    }
   };
 };
 
@@ -187,6 +362,49 @@ const executeIntent = async (parsed, user) => {
       resultType: 'appointments',
       data: result.rows,
       columns: ['date', 'startTime', 'status', 'patient', 'doctor']
+    };
+  }
+
+  if (intent === 'appointments.book') {
+    if (user.role !== 'patient') {
+      throw Object.assign(new Error('Only patients can initiate appointment booking through NLP'), { statusCode: 403 });
+    }
+
+    const doctorType = entities?.doctorType;
+    const parsedDate = parseRelativeDate(entities?.date);
+
+    if (!doctorType) {
+      return {
+        message: 'Please mention the doctor type/specialization (for example: cardiologist).',
+        resultType: 'appointment_booking',
+        data: [],
+        columns: ['doctor', 'specialization', 'consultationFee', 'date']
+      };
+    }
+
+    const matchedDoctors = await Doctor.find({ specialization: doctorType })
+      .populate('userId', 'name email')
+      .select('userId specialization consultationFee experience availability')
+      .limit(5);
+
+    const data = matchedDoctors.map((doctor) => ({
+      doctorId: doctor._id,
+      name: doctor.userId?.name || 'Doctor',
+      doctorName: doctor.userId?.name || 'Doctor',
+      specialization: doctor.specialization,
+      consultationFee: doctor.consultationFee,
+      experience: doctor.experience,
+      requestedDate: parsedDate || entities?.date || null,
+      requestedDateText: entities?.date || null
+    }));
+
+    return {
+      message: data.length > 0
+        ? `Intent detected: appointment booking. Found ${data.length} ${doctorType} doctor(s).`
+        : `Intent detected: appointment booking. No ${doctorType} doctors found right now.`,
+      resultType: 'appointment_booking',
+      data,
+      columns: ['doctorName', 'specialization', 'consultationFee', 'experience', 'requestedDateText']
     };
   }
 
@@ -378,7 +596,8 @@ const processNlpQuery = async (req, res, next) => {
       });
     }
 
-    const parsed = parseIntent(query);
+    let parsed = parseIntent(query);
+    parsed = await hydrateBookingEntitiesFromHistory(parsed, req.user, query);
 
     if (parsed.intent === 'unknown') {
       const history = await persistHistory({
@@ -397,6 +616,15 @@ const processNlpQuery = async (req, res, next) => {
           intent: parsed.intent,
           confidence: parsed.confidence,
           entities: parsed.entities,
+          nlpPipeline: {
+            preprocessing: {
+              normalized: parsed.pipeline?.normalized || '',
+              tokens: parsed.pipeline?.tokens || [],
+              filteredTokens: parsed.pipeline?.filteredTokens || []
+            },
+            intentDetection: parsed.intent,
+            entityExtraction: parsed.entities
+          },
           resultType: 'unknown',
           result: [],
           columns: [],
@@ -424,6 +652,15 @@ const processNlpQuery = async (req, res, next) => {
         intent: parsed.intent,
         confidence: parsed.confidence,
         entities: parsed.entities,
+        nlpPipeline: {
+          preprocessing: {
+            normalized: parsed.pipeline?.normalized || '',
+            tokens: parsed.pipeline?.tokens || [],
+            filteredTokens: parsed.pipeline?.filteredTokens || []
+          },
+          intentDetection: parsed.intent,
+          entityExtraction: parsed.entities
+        },
         resultType: execution.resultType,
         result: execution.data,
         columns: execution.columns,

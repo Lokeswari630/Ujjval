@@ -30,32 +30,136 @@ class EnhancedPharmacyManager {
   }
 
   /**
+   * Get pharmacy queue with emergency pre-pack orders pinned to top.
+   */
+  async getPharmacyQueue(status = 'all') {
+    const activeStatuses = ['pending', 'confirmed', 'preparing', 'ready', 'completed'];
+    const query = (status && status !== 'all')
+      ? { status }
+      : { status: { $in: activeStatuses } };
+
+    const rows = await PharmacyOrder.find(query)
+      .populate('patientId', 'name email phone')
+      .populate('prescriptionId', 'prescriptionFiles prescription.medicines')
+      .populate({ path: 'doctorId', populate: { path: 'userId', select: 'name email' }, select: 'userId specialization' })
+      .populate('assignedPharmacist', 'name')
+      .sort({ createdAt: 1 });
+
+    const priorityRank = { urgent: 4, high: 3, medium: 2, low: 1 };
+
+    rows.sort((a, b) => {
+      const emergencyDiff = Number(Boolean(b.emergencyPrePack)) - Number(Boolean(a.emergencyPrePack));
+      if (emergencyDiff !== 0) return emergencyDiff;
+
+      const priorityDiff = (priorityRank[b.priority] || 0) - (priorityRank[a.priority] || 0);
+      if (priorityDiff !== 0) return priorityDiff;
+
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
+
+    return rows;
+  }
+
+  /**
    * Create pharmacy order from prescription with enhanced prioritization
    */
-  async createOrderFromPrescription(appointmentId, priorityOverride = null) {
+  async createOrderFromPrescription(appointmentId, priorityOrOptions = null) {
     try {
+      const options = (priorityOrOptions && typeof priorityOrOptions === 'object' && !Array.isArray(priorityOrOptions))
+        ? priorityOrOptions
+        : { priorityOverride: priorityOrOptions };
+      const {
+        priorityOverride = null,
+        emergencyPrePack = false,
+        allowImageOnlyPrescription = false,
+        preferredPharmacistId = null,
+        requestedBy = null,
+        requestedByRole = null
+      } = options;
+
       // Get appointment with prescription
       const appointment = await Appointment.findById(appointmentId)
         .populate('patientId', 'name email phone address age gender')
         .populate('doctorId', 'userId specialization');
 
-      if (!appointment || !appointment.prescription) {
-        throw new Error('Appointment or prescription not found');
+      if (!appointment) {
+        throw new Error('Appointment not found');
       }
+
+      const structuredMedicines = Array.isArray(appointment?.prescription?.medicines)
+        ? appointment.prescription.medicines
+        : [];
+      const hasStructuredMedicines = structuredMedicines.length > 0;
+      const hasPrescriptionFiles = Array.isArray(appointment?.prescriptionFiles) && appointment.prescriptionFiles.length > 0;
+
+      if (!hasStructuredMedicines && !(allowImageOnlyPrescription && hasPrescriptionFiles)) {
+        throw new Error('Prescription medicines are required before sending to pharmacy');
+      }
+
+      const sourceMedicines = hasStructuredMedicines
+        ? structuredMedicines
+        : [
+          {
+            name: 'Prescription Image Review Required',
+            dosage: 'As per uploaded prescription image',
+            frequency: 'As prescribed',
+            duration: '7 days',
+            instructions: 'Pharmacist should verify medicines from uploaded prescription image before packing.'
+          }
+        ];
+
+      const resolvedPatientId = appointment?.patientId?._id || appointment?.patientId;
+      const resolvedDoctorId = appointment?.doctorId?._id || appointment?.doctorId;
+
+      if (!resolvedPatientId || !resolvedDoctorId) {
+        throw new Error('Appointment is missing patient or doctor details required for pharmacy order');
+      }
+
+      const patientName = String(appointment?.patientId?.name || 'Patient').trim() || 'Patient';
+      const patientPhone = String(appointment?.patientId?.phone || 'Not Provided').trim() || 'Not Provided';
+      const patientAddress = appointment?.patientId?.address || {};
 
       // Check if order already exists
       const existingOrder = await PharmacyOrder.findOne({
         prescriptionId: appointmentId,
-        status: { $ne: 'cancelled' }
+        status: { $in: ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'dispatched'] }
       });
 
       if (existingOrder) {
-        throw new Error('Pharmacy order already exists for this prescription');
+        if (emergencyPrePack && !existingOrder.emergencyPrePack) {
+          existingOrder.emergencyPrePack = true;
+          existingOrder.priority = 'urgent';
+          if (preferredPharmacistId) {
+            existingOrder.assignedPharmacist = preferredPharmacistId;
+          }
+          existingOrder.prePackRequestedBy = requestedBy || existingOrder.prePackRequestedBy;
+          existingOrder.prePackRequestedByRole = requestedByRole || existingOrder.prePackRequestedByRole;
+          existingOrder.prePackRequestedAt = new Date();
+          existingOrder.urgencyReason = [
+            existingOrder.urgencyReason,
+            'Emergency pre-pack requested to avoid queue wait.'
+          ].filter(Boolean).join(' ');
+
+          if (existingOrder.status === 'pending') {
+            existingOrder.status = 'confirmed';
+          }
+
+          await existingOrder.save();
+          return await this.getOrderWithDetails(existingOrder._id);
+        }
+
+        if (preferredPharmacistId && !existingOrder.assignedPharmacist) {
+          existingOrder.assignedPharmacist = preferredPharmacistId;
+          await existingOrder.save();
+        }
+
+        // Keep order creation idempotent for repeated doctor/patient actions.
+        return await this.getOrderWithDetails(existingOrder._id);
       }
 
       // Get patient's health prediction for enhanced priority calculation
       const healthPrediction = await HealthPrediction.findOne({
-        patientId: appointment.patientId._id
+        patientId: resolvedPatientId
       }).sort({ predictionDate: -1 });
 
       // Calculate enhanced order priority
@@ -64,8 +168,10 @@ class EnhancedPharmacyManager {
         healthPrediction
       );
 
+      const finalPriorityLevel = emergencyPrePack ? 'urgent' : priority.level;
+
       // Process medicines and calculate prices
-      const processedMedicines = await this.processMedicines(appointment.prescription.medicines);
+      const processedMedicines = await this.processMedicines(sourceMedicines);
       
       // Calculate total amount
       const totalAmount = processedMedicines.reduce((sum, med) => sum + (med.price * med.quantity), 0);
@@ -73,18 +179,26 @@ class EnhancedPharmacyManager {
       // Create pharmacy order
       const order = await PharmacyOrder.create({
         prescriptionId: appointmentId,
-        patientId: appointment.patientId._id,
-        doctorId: appointment.doctorId._id,
+        patientId: resolvedPatientId,
+        doctorId: resolvedDoctorId,
         medicines: processedMedicines,
         totalAmount,
         finalAmount: totalAmount,
-        priority: priority.level,
-        urgencyReason: priority.reason,
+        priority: finalPriorityLevel,
+        emergencyPrePack,
+        prePackRequestedBy: requestedBy,
+        prePackRequestedByRole: requestedByRole,
+        prePackRequestedAt: emergencyPrePack ? new Date() : undefined,
+        urgencyReason: emergencyPrePack
+          ? `${priority.reason} Emergency pre-pack requested to avoid queue wait.${hasStructuredMedicines ? '' : ' Medicines to be validated from uploaded prescription image by pharmacist.'}`.trim()
+          : priority.reason,
         preparationTime: this.calculatePreparationTime(processedMedicines.length),
+        status: emergencyPrePack ? 'confirmed' : 'pending',
+        assignedPharmacist: preferredPharmacistId || undefined,
         patientDetails: {
-          name: appointment.patientId.name,
-          phone: appointment.patientId.phone,
-          address: appointment.patientId.address
+          name: patientName,
+          phone: patientPhone,
+          address: patientAddress
         }
       });
 
@@ -93,7 +207,7 @@ class EnhancedPharmacyManager {
       
       // Update order with enhanced priority
       await PharmacyOrder.findByIdAndUpdate(order._id, {
-        priority: enhancedPriority.priorityLevel
+        priority: emergencyPrePack ? 'urgent' : enhancedPriority.priorityLevel
       });
 
       // Auto-assign priority queue position
@@ -119,6 +233,9 @@ class EnhancedPharmacyManager {
     let score = 0;
     let reason = '';
     let level = 'medium';
+    const medicineCount = Array.isArray(appointment?.prescription?.medicines)
+      ? appointment.prescription.medicines.length
+      : 1;
 
     // Health risk factor (40% weight)
     if (healthPrediction) {
@@ -153,7 +270,6 @@ class EnhancedPharmacyManager {
     }
 
     // Complexity factor (20% weight)
-    const medicineCount = appointment.prescription.medicines.length;
     const complexityScore = Math.min(medicineCount * 10, 100);
     score += complexityScore * 0.2;
     
@@ -384,7 +500,7 @@ class EnhancedPharmacyManager {
       await this.sendStatusUpdateNotification(order, oldStatus, newStatus);
 
       // Reassign queue positions if needed
-      if (['confirmed', 'preparing', 'ready'].includes(newStatus)) {
+      if (['confirmed', 'preparing', 'ready', 'completed'].includes(newStatus)) {
         await this.reassignEnhancedQueuePositions();
       }
 
@@ -440,6 +556,7 @@ class EnhancedPharmacyManager {
       confirmed: `Your high-priority order ${order.orderId} has been confirmed. Estimated ready time: ${order.estimatedReadyTime}`,
       preparing: `Your order ${order.orderId} is being prepared with priority attention`,
       ready: `Your priority order ${order.orderId} is ready for ${order.deliveryOption === 'delivery' ? 'delivery' : 'pickup'}`,
+      completed: `Your order ${order.orderId} is completed. Please collect medicines from store.`,
       dispatched: `Your order ${order.orderId} has been dispatched`,
       delivered: `Your order ${order.orderId} has been delivered`,
       cancelled: `Your order ${order.orderId} has been cancelled`
@@ -480,6 +597,7 @@ class EnhancedPharmacyManager {
    */
   async getOrderWithDetails(orderId) {
     return await PharmacyOrder.findById(orderId)
+      .populate('prescriptionId', 'prescriptionFiles prescription.medicines')
       .populate('patientId', 'name email phone address')
       .populate('doctorId', 'userId specialization')
       .populate('assignedPharmacist', 'name')
@@ -576,6 +694,11 @@ class EnhancedPharmacyManager {
       console.error('Error getting enhanced pharmacy stats:', error);
       throw error;
     }
+  }
+
+  // Backward-compatible alias used by existing controllers.
+  async getPharmacyStats(dateRange = 'today') {
+    return this.getEnhancedPharmacyStats(dateRange);
   }
 
   /**

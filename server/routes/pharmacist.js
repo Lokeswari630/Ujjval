@@ -6,6 +6,8 @@ const pharmacyPrioritizer = require('../services/pharmacyPrioritizer');
 
 const router = express.Router();
 
+const resolveUserId = (user) => String(user?._id || user?.id || '');
+
 // All routes are protected
 router.use(protect);
 
@@ -14,20 +16,30 @@ router.use(protect);
 // @access  Private (Pharmacist only)
 router.get('/dashboard', authorize('pharmacist'), async (req, res, next) => {
   try {
-    const pharmacistId = req.user.id;
+    const pharmacistId = resolveUserId(req.user);
 
     // Get today's priority queue
-    const priorityQueue = await pharmacyPrioritizer.getEnhancedPriorityQueue();
+    let priorityQueue = { queue: [], summary: {}, alerts: [] };
+    try {
+      priorityQueue = await pharmacyPrioritizer.getEnhancedPriorityQueue();
+    } catch (priorityError) {
+      // Keep dashboard available even if prioritization fails for some legacy records.
+      console.error('Priority queue generation failed:', priorityError?.message || priorityError);
+    }
 
     // Get pharmacist's assigned orders
     const assignedOrders = await PharmacyOrder.find({
-      assignedPharmacist: pharmacistId,
-      status: { $in: ['confirmed', 'preparing', 'ready'] }
+      $or: [
+        { assignedPharmacist: pharmacistId },
+        { 'notes.addedBy': pharmacistId }
+      ],
+      status: { $in: ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'dispatched', 'delivered'] }
     }).populate('patientId', 'name phone')
+      .populate('prescriptionId', 'prescriptionFiles prescription.medicines')
       .populate('doctorId', 'userId specialization')
-      .sort({ priority: -1, createdAt: 1 });
+      .sort({ updatedAt: -1, createdAt: -1 });
 
-    // Get low stock alerts
+    // Get low stock alerts with current units
     const lowStockMedicines = await MedicineInventory.getLowStock();
 
     // Get today's statistics
@@ -41,6 +53,7 @@ router.get('/dashboard', authorize('pharmacist'), async (req, res, next) => {
         lowStockAlerts: lowStockMedicines.map(med => ({
           name: med.name,
           stock: med.stock,
+          currentUnits: med.stock,
           minLevel: med.minStockLevel,
           status: med.stockStatus
         })),
@@ -98,7 +111,7 @@ router.get('/queue', authorize('pharmacist'), async (req, res, next) => {
 router.patch('/orders/:id/assign', authorize('pharmacist'), async (req, res, next) => {
   try {
     const orderId = req.params.id;
-    const pharmacistId = req.user.id;
+    const pharmacistId = resolveUserId(req.user);
 
     const order = await PharmacyOrder.findById(orderId);
     if (!order) {
@@ -148,7 +161,7 @@ router.patch('/orders/:id/assign', authorize('pharmacist'), async (req, res, nex
 router.patch('/orders/:id/start-preparation', authorize('pharmacist'), async (req, res, next) => {
   try {
     const orderId = req.params.id;
-    const pharmacistId = req.user.id;
+    const pharmacistId = resolveUserId(req.user);
 
     const order = await PharmacyOrder.findById(orderId);
     if (!order) {
@@ -205,7 +218,7 @@ router.patch('/orders/:id/start-preparation', authorize('pharmacist'), async (re
 router.patch('/orders/:id/complete-preparation', authorize('pharmacist'), async (req, res, next) => {
   try {
     const orderId = req.params.id;
-    const pharmacistId = req.user.id;
+    const pharmacistId = resolveUserId(req.user);
     const { notes, qualityCheckPassed } = req.body;
 
     const order = await PharmacyOrder.findById(orderId);
@@ -233,8 +246,8 @@ router.patch('/orders/:id/complete-preparation', authorize('pharmacist'), async 
       });
     }
 
-    // Complete preparation
-    order.status = 'ready';
+    // Complete preparation and mark as completed for store pickup.
+    order.status = 'completed';
     order.actualReadyTime = new Date();
 
     // Quality check
@@ -250,7 +263,7 @@ router.patch('/orders/:id/complete-preparation', authorize('pharmacist'), async 
     await order.save();
 
     // Send notification to patient
-    await sendPatientNotification(order, 'ready');
+    await sendPatientNotification(order, 'completed');
 
     const updatedOrder = await PharmacyOrder.findById(orderId)
       .populate('patientId', 'name phone')
@@ -273,7 +286,7 @@ router.patch('/orders/:id/complete-preparation', authorize('pharmacist'), async 
 router.patch('/orders/:id/dispatch', authorize('pharmacist'), async (req, res, next) => {
   try {
     const orderId = req.params.id;
-    const pharmacistId = req.user.id;
+    const pharmacistId = resolveUserId(req.user);
     const { dispatchType, recipientName, recipientPhone, deliveryPartner } = req.body;
 
     const order = await PharmacyOrder.findById(orderId);
@@ -284,20 +297,31 @@ router.patch('/orders/:id/dispatch', authorize('pharmacist'), async (req, res, n
       });
     }
 
-    if (order.status !== 'ready') {
+    if (!['ready', 'completed'].includes(order.status)) {
       return res.status(400).json({
         success: false,
-        message: 'Order must be ready before dispatch'
+        message: 'Order must be completed before dispatch'
       });
     }
+
+    if (order.assignedPharmacist?.toString() !== pharmacistId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not assigned to this order'
+      });
+    }
+
+    const resolvedDispatchType = dispatchType === 'delivery' ? 'delivery' : 'pickup';
+    const resolvedRecipientName = String(recipientName || order?.patientDetails?.name || 'Patient').trim();
+    const resolvedRecipientPhone = String(recipientPhone || order?.patientDetails?.phone || 'Not provided').trim();
 
     // Update inventory (deduct medicines)
     await updateMedicineInventory(order.medicines, 'deduct');
 
     // Handle dispatch
-    order.status = dispatchType === 'delivery' ? 'dispatched' : 'delivered';
+    order.status = resolvedDispatchType === 'delivery' ? 'dispatched' : 'delivered';
     
-    if (dispatchType === 'delivery') {
+    if (resolvedDispatchType === 'delivery') {
       order.deliveryDetails = {
         partner: deliveryPartner || 'Internal Delivery',
         trackingId: 'DEL' + Date.now(),
@@ -308,7 +332,7 @@ router.patch('/orders/:id/dispatch', authorize('pharmacist'), async (req, res, n
 
     // Add dispatch notes
     order.notes.push({
-      text: `Order ${dispatchType === 'delivery' ? 'dispatched to' : 'picked up by'} ${recipientName} (${recipientPhone})`,
+      text: `Order ${resolvedDispatchType === 'delivery' ? 'dispatched to' : 'picked up by'} ${resolvedRecipientName} (${resolvedRecipientPhone})`,
       addedBy: pharmacistId,
       addedAt: new Date()
     });
@@ -316,7 +340,7 @@ router.patch('/orders/:id/dispatch', authorize('pharmacist'), async (req, res, n
     await order.save();
 
     // Send final notification
-    await sendPatientNotification(order, dispatchType);
+    await sendPatientNotification(order, resolvedDispatchType);
 
     const updatedOrder = await PharmacyOrder.findById(orderId)
       .populate('patientId', 'name phone')
@@ -324,7 +348,7 @@ router.patch('/orders/:id/dispatch', authorize('pharmacist'), async (req, res, n
 
     res.status(200).json({
       success: true,
-      message: `Order ${dispatchType === 'delivery' ? 'dispatched' : 'delivered'} successfully`,
+      message: `Order ${resolvedDispatchType === 'delivery' ? 'dispatched' : 'delivered'} successfully`,
       data: updatedOrder
     });
 
@@ -380,6 +404,96 @@ router.get('/inventory', authorize('pharmacist'), async (req, res, next) => {
   }
 });
 
+// @desc    Add new medicine to inventory
+// @route   POST /api/pharmacist/inventory
+// @access  Private (Pharmacist only)
+router.post('/inventory', authorize('pharmacist'), async (req, res, next) => {
+  try {
+    const {
+      name,
+      stock,
+      minStockLevel,
+      brand = 'Generic',
+      category = 'general',
+      dosage = 'Standard',
+      form = 'tablet',
+      packageSize = 1,
+      unit = 'tablets',
+      price = 0
+    } = req.body;
+
+    if (!name || !stock || !minStockLevel) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, stock, and minimum stock level are required'
+      });
+    }
+
+    // Check if medicine already exists
+    const existingMedicine = await MedicineInventory.findOne({ 
+      name: { $regex: new RegExp(`^${name}$`, 'i') },
+      isActive: true 
+    });
+
+    if (existingMedicine) {
+      return res.status(400).json({
+        success: false,
+        message: 'Medicine with this name already exists in inventory'
+      });
+    }
+
+    // Map category to valid enum value
+    const categoryMap = {
+      'general': 'pain_relief',
+      'antibiotics': 'antibiotics',
+      'pain': 'pain_relief',
+      'cardio': 'cardiovascular',
+      'respiratory': 'respiratory',
+      'gi': 'gastrointestinal',
+      'skin': 'dermatological',
+      'diabetes': 'endocrine',
+      'neuro': 'neurological',
+      'vitamins': 'vitamins',
+      'emergency': 'emergency',
+      'chronic': 'chronic',
+      'pediatric': 'pediatric'
+    };
+
+    const validCategory = categoryMap[category.toLowerCase()] || 'pain_relief';
+
+    // Calculate expiry date (2 years from now)
+    const expiryDate = new Date();
+    expiryDate.setFullYear(expiryDate.getFullYear() + 2);
+
+    const medicine = await MedicineInventory.create({
+      name,
+      stock: Number(stock),
+      minStockLevel: Number(minStockLevel),
+      maxStockLevel: Number(minStockLevel) * 10, // Default max stock = 10x min stock
+      brand: brand || 'Generic',
+      category: validCategory,
+      dosage: dosage || 'Standard',
+      form: form || 'tablet',
+      packageSize: Number(packageSize) || 1,
+      unit: unit || 'tablets',
+      price: Number(price) || 0,
+      costPrice: Number(price) * 0.7 || 0, // Default cost price = 70% of selling price
+      expiryDate: expiryDate,
+      isActive: true,
+      lastRestocked: new Date()
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Medicine added to inventory successfully',
+      data: medicine
+    });
+  } catch (error) {
+    console.error('Error adding medicine:', error);
+    next(error);
+  }
+});
+
 // @desc    Update medicine stock
 // @route   PATCH /api/pharmacist/inventory/:id/stock
 // @access  Private (Pharmacist only)
@@ -412,7 +526,7 @@ router.patch('/inventory/:id/stock', authorize('pharmacist'), async (req, res, n
     }
 
     // Add stock adjustment record
-    await addStockAdjustmentRecord(medicineId, quantity, operation, reason, req.user.id);
+    await addStockAdjustmentRecord(medicineId, quantity, operation, reason, resolveUserId(req.user));
 
     res.status(200).json({
       success: true,
@@ -430,7 +544,7 @@ router.patch('/inventory/:id/stock', authorize('pharmacist'), async (req, res, n
 // @access  Private (Pharmacist only)
 router.get('/performance', authorize('pharmacist'), async (req, res, next) => {
   try {
-    const pharmacistId = req.user.id;
+    const pharmacistId = resolveUserId(req.user);
     const { period = 'today' } = req.query;
 
     const performance = await getPharmacistPerformance(pharmacistId, period);
@@ -450,7 +564,14 @@ async function checkMedicineAvailability(medicines) {
   const unavailableMedicines = [];
   let allAvailable = true;
 
+  const IMAGE_REVIEW_PLACEHOLDER = 'Prescription Image Review Required';
+
   for (const medicine of medicines) {
+    // Image-only prescription flow uses this placeholder and requires manual pharmacist verification.
+    if (String(medicine?.name || '').trim().toLowerCase() === IMAGE_REVIEW_PLACEHOLDER.toLowerCase()) {
+      continue;
+    }
+
     const inventory = await MedicineInventory.findOne({
       name: { $regex: medicine.name, $options: 'i' },
       isActive: true
@@ -492,7 +613,15 @@ async function sendPatientNotification(order, type) {
   
   order.notifications.push({
     type: 'sms',
-    message: `Your medicine order ${order.orderId} is ${type === 'ready' ? 'ready for pickup' : type === 'delivery' ? 'out for delivery' : 'delivered'}`,
+    message: `Your medicine order ${order.orderId} is ${
+      type === 'completed'
+        ? 'completed. The medicines are packed..came and take the order.'
+        : type === 'ready'
+          ? 'ready for pickup'
+          : type === 'delivery'
+            ? 'out for delivery'
+            : 'delivered'
+    }`,
     sentAt: new Date(),
     status: 'sent'
   });
@@ -504,13 +633,19 @@ async function getPharmacistStats(pharmacistId, period) {
   const dateFilter = getDateFilter(period);
   
   const orders = await PharmacyOrder.find({
-    assignedPharmacist: pharmacistId,
+    $or: [
+      { assignedPharmacist: pharmacistId },
+      { 'notes.addedBy': pharmacistId }
+    ],
     createdAt: dateFilter
   });
 
   return {
     totalOrders: orders.length,
-    completedOrders: orders.filter(o => o.status === 'delivered').length,
+    completedOrders: orders.filter(o => ['completed', 'delivered'].includes(o.status)).length,
+    revenue: orders
+      .filter(o => ['completed', 'delivered'].includes(o.status))
+      .reduce((sum, o) => sum + (Number(o.finalAmount) || 0), 0),
     averagePrepTime: orders.length > 0 ? 
       Math.round(orders.reduce((sum, o) => sum + o.preparationTime, 0) / orders.length) : 0,
     priorityDistribution: {
@@ -574,11 +709,14 @@ async function getPharmacistPerformance(pharmacistId, period) {
   const dateFilter = getDateFilter(period);
   
   const orders = await PharmacyOrder.find({
-    assignedPharmacist: pharmacistId,
+    $or: [
+      { assignedPharmacist: pharmacistId },
+      { 'notes.addedBy': pharmacistId }
+    ],
     createdAt: dateFilter
   });
 
-  const completedOrders = orders.filter(o => o.status === 'delivered');
+  const completedOrders = orders.filter(o => ['completed', 'delivered'].includes(o.status));
   
   return {
     period,

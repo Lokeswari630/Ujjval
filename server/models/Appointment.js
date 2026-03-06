@@ -153,6 +153,27 @@ const appointmentSchema = new mongoose.Schema({
       trim: true,
       maxlength: [500, 'Lab report notes cannot exceed 500 characters']
     },
+    infectionAnalysis: {
+      percentage: {
+        type: Number,
+        min: 0,
+        max: 100
+      },
+      confidence: {
+        type: Number,
+        min: 0,
+        max: 1
+      },
+      riskLevel: {
+        type: String,
+        enum: ['low', 'medium', 'high']
+      },
+      summary: {
+        type: String,
+        maxlength: [500, 'Infection analysis summary cannot exceed 500 characters']
+      },
+      analyzedAt: Date
+    },
     uploadedAt: {
       type: Date,
       default: Date.now

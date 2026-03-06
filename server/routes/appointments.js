@@ -10,6 +10,10 @@ const {
   updateAppointmentStatus,
   startVideoConsultation,
   addPrescription,
+  sendPrescriptionToPharmacyEmergency,
+  getPharmacyOrderStatusForAppointment,
+  getNearbyPharmacistsForAppointment,
+  analyzeLabReportUpload,
   addDiagnosis,
   updateConsultationDetails,
   rateAppointment,
@@ -29,6 +33,10 @@ router.post('/:id/payment/confirm', authorize('patient'), confirmAppointmentPaym
 router.patch('/:id/status', updateAppointmentStatus);
 router.post('/:id/video/start', authorize('doctor'), startVideoConsultation);
 router.post('/:id/prescription', authorize('doctor'), addPrescription);
+router.post('/:id/prescription/send-to-pharmacy', authorize('patient', 'doctor'), sendPrescriptionToPharmacyEmergency);
+router.get('/:id/pharmacy-order-status', authorize('patient', 'doctor'), getPharmacyOrderStatusForAppointment);
+router.get('/:id/nearby-pharmacists', authorize('patient', 'doctor'), getNearbyPharmacistsForAppointment);
+router.post('/lab-report/analyze', authorize('doctor', 'patient'), analyzeLabReportUpload);
 router.patch('/:id/diagnosis', authorize('doctor'), addDiagnosis);
 router.patch('/:id/consultation', authorize('doctor'), updateConsultationDetails);
 router.post('/:id/rating', authorize('patient'), rateAppointment);

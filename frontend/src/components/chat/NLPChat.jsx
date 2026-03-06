@@ -148,7 +148,8 @@ const NLPChat = () => {
 
     const getRoleProfileRoute = () => {
       if (user?.role === 'doctor') return '/doctor-profile';
-      if (user?.role === 'patient') return '/patient-profile';
+      if (user?.role === 'patient') return '/patient/profile';
+      if (user?.role === 'pharmacist') return '/pharmacist/profile';
       if (user?.role === 'admin') return '/admin-profile';
       return '/profile';
     };

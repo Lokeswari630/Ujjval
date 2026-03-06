@@ -3,7 +3,7 @@ const pharmacyManager = require('../services/pharmacyManager-enhanced');
 
 const createPharmacyOrder = async (req, res, next) => {
   try {
-    const { appointmentId, priorityOverride } = req.body;
+    const { appointmentId, priorityOverride, emergencyPrePack = false } = req.body;
 
     if (!appointmentId) {
       return res.status(400).json({
@@ -12,7 +12,12 @@ const createPharmacyOrder = async (req, res, next) => {
       });
     }
 
-    const order = await pharmacyManager.createOrderFromPrescription(appointmentId, priorityOverride);
+    const order = await pharmacyManager.createOrderFromPrescription(appointmentId, {
+      priorityOverride,
+      emergencyPrePack: Boolean(emergencyPrePack),
+      requestedBy: req.user.id,
+      requestedByRole: req.user.role
+    });
 
     res.status(201).json({
       success: true,
@@ -42,7 +47,7 @@ const updatePharmacyOrderStatus = async (req, res, next) => {
   try {
     const { status, reason } = req.body;
 
-    if (!['pending', 'confirmed', 'preparing', 'ready', 'dispatched', 'delivered', 'cancelled'].includes(status)) {
+    if (!['pending', 'confirmed', 'preparing', 'ready', 'completed', 'dispatched', 'delivered', 'cancelled'].includes(status)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid status'

@@ -85,6 +85,7 @@ class MedicalReportExplainer {
   async explain(reportText) {
     const aiExplanation = await this.getApiBasedExplanation(reportText);
     if (aiExplanation) {
+      aiExplanation.infectionAssessment = this.estimateInfectionPercentage(reportText, aiExplanation.extracted || []);
       return aiExplanation;
     }
 
@@ -119,6 +120,7 @@ class MedicalReportExplainer {
 
     const symptomFallback = this.getSymptomBasedFallback(reportText);
     const overallRisk = symptomFallback?.overallRisk || this.getOverallRisk(extracted);
+    const infectionAssessment = this.estimateInfectionPercentage(reportText, extracted);
     const fallbackSummary = symptomFallback
       ? `${symptomFallback.summary} ${symptomFallback.disclaimer}`
       : 'No known markers were detected. Please share a structured report or consult your clinician for interpretation.';
@@ -126,6 +128,7 @@ class MedicalReportExplainer {
     return {
       extracted,
       overallRisk,
+      infectionAssessment,
       summary: explanations.length
         ? explanations.join(' ')
         : fallbackSummary,
@@ -242,6 +245,49 @@ class MedicalReportExplainer {
     }
 
     return 'low';
+  }
+
+  estimateInfectionPercentage(reportText, extracted) {
+    const text = String(reportText || '').toLowerCase();
+    let score = 12;
+
+    const markerRows = Array.isArray(extracted) ? extracted : [];
+    const addScoreFromMarker = (markerName, whenHigh, whenLow = 0) => {
+      const row = markerRows.find((item) => String(item?.marker || '').toLowerCase().includes(markerName));
+      if (!row) return;
+      if (row.status === 'high') score += whenHigh;
+      if (row.status === 'low') score += whenLow;
+    };
+
+    // Structured lab marker signals
+    addScoreFromMarker('wbc', 20);
+    addScoreFromMarker('white blood', 20);
+    addScoreFromMarker('neutrophil', 18);
+    addScoreFromMarker('crp', 20);
+    addScoreFromMarker('esr', 12);
+    addScoreFromMarker('procalcitonin', 24);
+    addScoreFromMarker('platelet', 8);
+
+    // Textual report cues
+    if (/infection|infective/i.test(text)) score += 16;
+    if (/bacterial|sepsis|septic/i.test(text)) score += 18;
+    if (/viral/i.test(text)) score += 10;
+    if (/pneumonia|uti|urinary tract infection|cellulitis/i.test(text)) score += 14;
+    if (/normal|within normal limits|wnl|negative for infection/i.test(text)) score -= 14;
+
+    // Fever and inflammatory symptoms can raise suspicion when report text includes them.
+    if (/fever|chills|rigors|productive cough|pus/i.test(text)) score += 8;
+
+    const bounded = Math.max(1, Math.min(99, Math.round(score)));
+    const confidence = markerRows.length > 0 ? 0.78 : (text.length > 60 ? 0.56 : 0.42);
+    const riskLevel = bounded >= 70 ? 'high' : bounded >= 40 ? 'medium' : 'low';
+
+    return {
+      percentage: bounded,
+      confidence: Number(confidence.toFixed(2)),
+      riskLevel,
+      summary: `Estimated infection likelihood is ${bounded}% based on available report signals.`
+    };
   }
 }
 

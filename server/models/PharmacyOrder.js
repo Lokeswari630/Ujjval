@@ -86,7 +86,7 @@ const pharmacyOrderSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'preparing', 'ready', 'dispatched', 'delivered', 'cancelled'],
+    enum: ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'dispatched', 'delivered', 'cancelled'],
     default: 'pending'
   },
   priority: {
@@ -94,6 +94,19 @@ const pharmacyOrderSchema = new mongoose.Schema({
     enum: ['low', 'medium', 'high', 'urgent'],
     default: 'medium'
   },
+  emergencyPrePack: {
+    type: Boolean,
+    default: false
+  },
+  prePackRequestedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  prePackRequestedByRole: {
+    type: String,
+    enum: ['doctor', 'patient', 'admin']
+  },
+  prePackRequestedAt: Date,
   urgencyReason: {
     type: String,
     trim: true
@@ -226,6 +239,7 @@ pharmacyOrderSchema.virtual('statusDisplay').get(function() {
     'confirmed': 'Order Confirmed',
     'preparing': 'Preparing Medicines',
     'ready': 'Ready for Pickup',
+    'completed': 'Completed - Collect from Store',
     'dispatched': 'Out for Delivery',
     'delivered': 'Delivered',
     'cancelled': 'Cancelled'
@@ -235,7 +249,7 @@ pharmacyOrderSchema.virtual('statusDisplay').get(function() {
 
 // Virtual for time remaining
 pharmacyOrderSchema.virtual('timeRemaining').get(function() {
-  if (this.status === 'delivered' || this.status === 'cancelled') {
+  if (this.status === 'completed' || this.status === 'delivered' || this.status === 'cancelled') {
     return null;
   }
   
@@ -269,6 +283,7 @@ pharmacyOrderSchema.methods.updateStatus = function(newStatus, updatedBy, reason
     case 'confirmed':
       this.estimatedReadyTime = new Date(Date.now() + this.preparationTime * 60 * 1000);
       break;
+    case 'completed':
     case 'ready':
       this.actualReadyTime = new Date();
       break;
@@ -304,7 +319,7 @@ pharmacyOrderSchema.methods.canBeCancelled = function() {
 
 // Method to check if order is ready
 pharmacyOrderSchema.methods.isReady = function() {
-  return ['ready', 'dispatched', 'delivered'].includes(this.status);
+  return ['ready', 'completed', 'dispatched', 'delivered'].includes(this.status);
 };
 
 module.exports = mongoose.model('PharmacyOrder', pharmacyOrderSchema);

@@ -1,46 +1,49 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Pill, Clock, AlertCircle, TrendingUp, Package, Users, Activity } from 'lucide-react';
+import { 
+  Hospital, Clock, AlertCircle, TrendingUp, Package, Users, Activity, PlusCircle, 
+  CheckCircle2, BarChart3, PieChart, TrendingDown, Zap, Target, 
+  ShoppingCart, FileText, Settings, Bell, Calendar, ArrowUp, ArrowDown,
+  DollarSign, Users2, Timer, PackageOpen, AlertTriangle
+} from 'lucide-react';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Modal from '../components/ui/Modal';
 import HealthChart from '../components/charts/HealthChart';
-import { pharmacyAPI, pharmacistAPI } from '../services/api';
+import NLPChat from '../components/chat/NLPChat';
+import { pharmacistAPI } from '../services/api';
 
 const PharmacistDashboard = () => {
   const { user, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState('queue');
+  const [statsTab, setStatsTab] = useState('overview');
+  const [orderViewFilter, setOrderViewFilter] = useState('all');
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [quickDeltas, setQuickDeltas] = useState({
+    queue: null,
+    lowStock: null,
+    inventory: null,
+    totalOrders: null
+  });
+  const hasInitializedRef = useRef(false);
+  const previousCountsRef = useRef({
+    queue: 0,
+    lowStock: 0,
+    inventory: 0,
+    totalOrders: 0
+  });
   const [data, setData] = useState({
     queue: [],
+    assignedOrders: [],
     stats: {},
-    lowStock: []
+    lowStock: [],
+    inventoryCount: 0
   });
-  const [loading, setLoading] = useState(true);
-  const [orderActionLoading, setOrderActionLoading] = useState({});
-  const [actionModal, setActionModal] = useState({
-    isOpen: false,
-    type: null,
-    order: null,
-    notes: '',
-    qualityCheckPassed: true,
-    dispatchType: 'pickup',
-    recipientName: '',
-    recipientPhone: '',
-    deliveryPartner: 'Internal Delivery'
-  });
-
-  useEffect(() => {
-    loadData();
-  }, []);
 
   const loadData = async () => {
     try {
-      setLoading(true);
-      const [dashboard, queue, stats, lowStockInventory] = await Promise.all([
+      const [dashboard, lowStockInventory] = await Promise.all([
         pharmacistAPI.getDashboard(),
-        pharmacyAPI.getQueue(),
-        pharmacyAPI.getStats(),
         pharmacistAPI.getInventory({ lowStock: true })
       ]);
 
@@ -51,6 +54,7 @@ const PharmacistDashboard = () => {
         stock: med.stock,
         minLevel: med.minStockLevel
       })) || [];
+      const totalInventoryCount = Number(lowStockInventory?.data?.summary?.totalMedicines || 0);
 
       const lowStockByName = new Map(lowStockFromInventory.map((item) => [item.name?.toLowerCase(), item]));
       const mergedLowStock = (lowStockFromDashboard.length ? lowStockFromDashboard : lowStockFromInventory).map((item) => {
@@ -62,378 +66,215 @@ const PharmacistDashboard = () => {
         };
       });
 
-      setData({
-        queue: dashboard?.data?.priorityQueue?.queue || queue.data || dashboard?.data?.assignedOrders || [],
-        stats: stats.data || dashboard?.data?.stats || {},
-        lowStock: mergedLowStock
-      });
-    } catch (error) {
-      console.error('Error loading data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      const pharmacistStats = dashboard?.data?.stats || {};
+      const assignedOrders = Array.isArray(dashboard?.data?.assignedOrders)
+        ? dashboard.data.assignedOrders
+        : [];
+      const completedFromAssigned = assignedOrders.filter((order) => ['completed', 'delivered'].includes(String(order?.status || '').toLowerCase())).length;
+      const totalFromAssigned = assignedOrders.length;
+      const avgPrepFromAssigned = totalFromAssigned > 0
+        ? Math.round(assignedOrders.reduce((sum, order) => sum + Number(order?.preparationTime || 0), 0) / totalFromAssigned)
+        : 0;
+      const revenueFromAssigned = assignedOrders
+        .filter((order) => ['completed', 'delivered'].includes(String(order?.status || '').toLowerCase()))
+        .reduce((sum, order) => sum + Number(order?.finalAmount || 0), 0);
 
-  const handleRestock = async (item) => {
-    if (!item?.id) {
-      alert('Inventory item ID is missing for this medicine. Open inventory list and restock there.');
-      return;
-    }
+      const normalizedStats = {
+        totalOrders: Number(pharmacistStats.totalOrders || totalFromAssigned || 0),
+        completedOrders: Number(pharmacistStats.completedOrders || completedFromAssigned || 0),
+        averagePrepTime: Number(pharmacistStats.averagePrepTime || avgPrepFromAssigned || 0),
+        revenue: Number(pharmacistStats.revenue ?? pharmacistStats.totalRevenue ?? revenueFromAssigned ?? 0),
+        priorityDistribution: pharmacistStats.priorityDistribution || { urgent: 0, high: 0, medium: 0, low: 0 }
+      };
 
-    const quantityInput = window.prompt(`Add stock quantity for ${item.name}:`, '10');
-    if (!quantityInput) return;
+      const activeStatuses = new Set(['pending', 'confirmed', 'preparing', 'ready', 'completed']);
+      const activeOrders = assignedOrders.filter((order) => activeStatuses.has(String(order?.status || '').toLowerCase()));
 
-    const quantity = Number(quantityInput);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      alert('Please enter a valid positive number.');
-      return;
-    }
+      const nextCounts = {
+        queue: activeOrders.length,
+        lowStock: mergedLowStock.length,
+        inventory: totalInventoryCount,
+        totalOrders: Number(normalizedStats.totalOrders || 0)
+      };
 
-    try {
-      await pharmacistAPI.updateInventoryStock(item.id, {
-        quantity,
-        operation: 'add',
-        reason: 'Manual restock from dashboard'
-      });
-      await loadData();
-    } catch (error) {
-      console.error('Restock failed:', error);
-      alert(error?.message || 'Failed to restock medicine.');
-    }
-  };
-
-  const withOrderAction = async (orderId, action) => {
-    setOrderActionLoading((prev) => ({ ...prev, [orderId]: true }));
-    try {
-      await action();
-      await loadData();
-    } catch (error) {
-      console.error('Order action failed:', error);
-      alert(error?.message || 'Order action failed.');
-    } finally {
-      setOrderActionLoading((prev) => ({ ...prev, [orderId]: false }));
-    }
-  };
-
-  const handleQueueAction = async (order) => {
-    if (!order?._id) return;
-
-    if (order.status === 'pending') {
-      return withOrderAction(order._id, () => pharmacistAPI.assignOrder(order._id));
-    }
-
-    if (order.status === 'confirmed') {
-      return withOrderAction(order._id, () => pharmacistAPI.startPreparation(order._id));
-    }
-
-    if (order.status === 'preparing') {
-      setActionModal({
-        isOpen: true,
-        type: 'complete',
-        order,
-        notes: '',
-        qualityCheckPassed: true,
-        dispatchType: 'pickup',
-        recipientName: '',
-        recipientPhone: '',
-        deliveryPartner: 'Internal Delivery'
-      });
-      return;
-    }
-
-    if (order.status === 'ready') {
-      setActionModal({
-        isOpen: true,
-        type: 'dispatch',
-        order,
-        notes: '',
-        qualityCheckPassed: true,
-        dispatchType: 'pickup',
-        recipientName: order.patientDetails?.name || 'Patient',
-        recipientPhone: order.patientDetails?.phone || '',
-        deliveryPartner: 'Internal Delivery'
-      });
-    }
-  };
-
-  const closeActionModal = () => {
-    setActionModal((prev) => ({ ...prev, isOpen: false }));
-  };
-
-  const submitActionModal = async () => {
-    const order = actionModal.order;
-    if (!order?._id) return;
-
-    if (actionModal.type === 'complete') {
-      await withOrderAction(order._id, () => pharmacistAPI.completePreparation(order._id, {
-        notes: actionModal.notes,
-        qualityCheckPassed: actionModal.qualityCheckPassed
-      }));
-      closeActionModal();
-      return;
-    }
-
-    if (actionModal.type === 'dispatch') {
-      if (!actionModal.recipientName?.trim() || !actionModal.recipientPhone?.trim()) {
-        alert('Recipient name and phone are required.');
-        return;
+      if (hasInitializedRef.current) {
+        setQuickDeltas({
+          queue: nextCounts.queue - previousCountsRef.current.queue,
+          lowStock: nextCounts.lowStock - previousCountsRef.current.lowStock,
+          inventory: nextCounts.inventory - previousCountsRef.current.inventory,
+          totalOrders: nextCounts.totalOrders - previousCountsRef.current.totalOrders
+        });
       }
 
-      await withOrderAction(order._id, () => pharmacistAPI.dispatchOrder(order._id, {
-        dispatchType: actionModal.dispatchType,
-        recipientName: actionModal.recipientName.trim(),
-        recipientPhone: actionModal.recipientPhone.trim(),
-        deliveryPartner: actionModal.dispatchType === 'delivery'
-          ? actionModal.deliveryPartner?.trim() || 'Internal Delivery'
-          : undefined
-      }));
-      closeActionModal();
+      previousCountsRef.current = nextCounts;
+      hasInitializedRef.current = true;
+
+      setData({
+        // Dashboard counters and lists should reflect this pharmacist's workload only.
+        queue: activeOrders,
+        assignedOrders,
+        stats: normalizedStats,
+        lowStock: mergedLowStock,
+        inventoryCount: totalInventoryCount
+      });
+      setLastUpdated(new Date());
+    } catch (error) {
+      console.error('Error loading data:', error);
     }
   };
 
-  const getQueueActionLabel = (status) => {
-    if (status === 'pending') return 'Assign';
-    if (status === 'confirmed') return 'Start';
-    if (status === 'preparing') return 'Complete';
-    if (status === 'ready') return 'Dispatch';
-    return null;
+  useEffect(() => {
+    loadData();
+
+    const refreshTimer = window.setInterval(() => {
+      loadData();
+    }, 20000);
+
+    const onFocus = () => loadData();
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadData();
+      }
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      window.clearInterval(refreshTimer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, []);
+
+  const formatQuickTrend = (delta, label) => {
+    if (delta === null || Number.isNaN(delta)) {
+      return `Live ${label}`;
+    }
+    if (delta === 0) {
+      return `No change (${label})`;
+    }
+    return `${delta > 0 ? '+' : ''}${delta} ${label}`;
   };
 
-  const priorityDistribution = [
-    { name: 'Urgent', value: data.stats?.priorityDistribution?.urgent || 0 },
-    { name: 'High', value: data.stats?.priorityDistribution?.high || 0 },
-    { name: 'Medium', value: data.stats?.priorityDistribution?.medium || 0 },
-    { name: 'Low', value: data.stats?.priorityDistribution?.low || 0 }
-  ];
+  const historicalOrders = (Array.isArray(data.assignedOrders) ? data.assignedOrders : []).filter((order) =>
+    ['dispatched', 'delivered'].includes(String(order?.status || '').toLowerCase())
+  );
 
-  const orderTrends = [
-    { name: 'Total', value: data.stats?.totalOrders || 0 },
-    { name: 'Completed', value: data.stats?.completedOrders || 0 },
-    { name: 'Pending', value: Math.max((data.stats?.totalOrders || 0) - (data.stats?.completedOrders || 0), 0) }
-  ];
+  const allAssignedOrders = Array.isArray(data.assignedOrders) ? data.assignedOrders : [];
 
   const quickActions = [
     {
-      title: 'View Queue',
-      description: 'Manage pharmacy queue',
+      title: 'Queue Management',
+      description: 'Process orders',
       icon: <Clock className="w-6 h-6" />,
-      tab: 'queue',
-      color: 'bg-blue-500'
+      path: '/pharmacist/queue',
+      color: 'bg-gradient-to-br from-blue-500 to-blue-600',
+      count: data.queue.length,
+      trend: formatQuickTrend(quickDeltas.queue, 'since refresh')
     },
     {
       title: 'Inventory',
-      description: 'Manage stock levels',
+      description: 'Total medicines',
       icon: <Package className="w-6 h-6" />,
-      tab: 'inventory',
-      color: 'bg-green-500'
+      path: '/pharmacist/inventory',
+      color: 'bg-gradient-to-br from-emerald-500 to-emerald-600',
+      count: data.inventoryCount || 0,
+      trend: formatQuickTrend(quickDeltas.inventory, 'since refresh')
     },
     {
-      title: 'Order History',
-      description: 'View past orders',
-      icon: <Activity className="w-6 h-6" />,
-      tab: 'queue',
-      color: 'bg-purple-500'
+      title: 'Analytics',
+      description: 'Reports & insights',
+      icon: <BarChart3 className="w-6 h-6" />,
+      path: '/pharmacist/analytics',
+      color: 'bg-gradient-to-br from-indigo-500 to-indigo-600',
+      count: data.stats?.totalOrders || 0,
+      trend: formatQuickTrend(quickDeltas.totalOrders, 'since refresh')
     },
     {
-      title: 'Reports',
-      description: 'Analytics & reports',
-      icon: <TrendingUp className="w-6 h-6" />,
-      tab: 'analytics',
-      color: 'bg-orange-500'
+      title: 'AI Assistant',
+      description: 'Smart help',
+      icon: <Zap className="w-6 h-6" />,
+      path: '/pharmacist/ai',
+      color: 'bg-gradient-to-br from-purple-500 to-purple-600',
+      count: '24/7',
+      trend: lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Live'
     }
   ];
 
-  const getPriorityColor = (priority) => {
-    switch (priority) {
-      case 'urgent': return 'bg-red-100 text-red-800';
-      case 'high': return 'bg-orange-100 text-orange-800';
-      case 'medium': return 'bg-yellow-100 text-yellow-800';
-      case 'low': return 'bg-green-100 text-green-800';
-      default: return 'bg-gray-100 text-gray-800';
+  const statCards = [
+    {
+      title: 'Total Revenue',
+      value: `$${(data.stats?.revenue || 0).toLocaleString()}`,
+      icon: <DollarSign className="w-8 h-8" />,
+      color: 'from-blue-500 to-blue-600',
+      trend: '+12.5%',
+      trendUp: true
+    },
+    {
+      title: 'Orders Processed',
+      value: data.stats?.totalOrders || 0,
+      icon: <ShoppingCart className="w-8 h-8" />,
+      color: 'from-emerald-500 to-emerald-600',
+      trend: '+8.2%',
+      trendUp: true
+    },
+    {
+      title: 'Completion Rate',
+      value: `${data.stats?.totalOrders > 0 ? Math.round((data.stats?.completedOrders / data.stats?.totalOrders) * 100) : 0}%`,
+      icon: <Target className="w-8 h-8" />,
+      color: 'from-indigo-500 to-indigo-600',
+      trend: '+3.1%',
+      trendUp: true
+    },
+    {
+      title: 'Avg. Processing Time',
+      value: `${data.stats?.averagePrepTime || 0}m`,
+      icon: <Timer className="w-8 h-8" />,
+      color: 'from-amber-500 to-amber-600',
+      trend: '-15.3%',
+      trendUp: false
     }
-  };
-
-  const renderQueue = () => (
-    <div className="space-y-6">
-      {/* Queue Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center">
-            <div className="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center text-white">
-              <Clock className="w-6 h-6" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm text-gray-600">In Queue</p>
-              <p className="text-2xl font-bold text-gray-900">{data.queue.length}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center">
-            <div className="w-12 h-12 bg-red-500 rounded-lg flex items-center justify-center text-white">
-              <AlertCircle className="w-6 h-6" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm text-gray-600">Urgent Orders</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {data.queue.filter(o => o.priority === 'urgent').length}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center">
-            <div className="w-12 h-12 bg-green-500 rounded-lg flex items-center justify-center text-white">
-              <Package className="w-6 h-6" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm text-gray-600">Ready Today</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {data.queue.filter(o => o.status === 'ready').length}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center">
-            <div className="w-12 h-12 bg-purple-500 rounded-lg flex items-center justify-center text-white">
-              <Users className="w-6 h-6" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm text-gray-600">Avg. Prep Time</p>
-              <p className="text-2xl font-bold text-gray-900">{data.stats?.averagePrepTime || 0} min</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Queue List */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="p-6 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">Active Queue</h3>
-        </div>
-        <div className="divide-y divide-gray-200">
-          {data.queue.length > 0 ? (
-            data.queue.map((order, index) => (
-              <div key={order._id} className="p-4 hover:bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <div className="text-lg font-medium text-gray-900">#{index + 1}</div>
-                    <div>
-                      <p className="font-medium text-gray-900">{order.patientDetails?.name || 'Patient'}</p>
-                      <p className="text-sm text-gray-600">Order #{order.orderId}</p>
-                      <p className="text-xs text-gray-500">
-                        {order.medicines?.length || 0} medicines • Est. {order.preparationTime || 0} min
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(order.priority)}`}>
-                      {order.priority}
-                    </span>
-                    <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full">
-                      {order.status}
-                    </span>
-                    {getQueueActionLabel(order.status) && (
-                      <Button
-                        size="sm"
-                        onClick={() => handleQueueAction(order)}
-                        disabled={!!orderActionLoading[order._id]}
-                      >
-                        {orderActionLoading[order._id] ? '...' : getQueueActionLabel(order.status)}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="p-8 text-center text-gray-500">
-              <Package className="w-12 h-12 mx-auto text-gray-300 mb-4" />
-              <p>No orders in queue</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderInventory = () => (
-    <div className="space-y-6">
-      {/* Low Stock Alerts */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="p-6 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">Low Stock Alerts</h3>
-        </div>
-        <div className="divide-y divide-gray-200">
-          {data.lowStock.length > 0 ? (
-            data.lowStock.map((item, index) => (
-              <div key={index} className="p-4 hover:bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-900">{item.name}</p>
-                    <p className="text-sm text-gray-600">
-                      Current: {item.stock} | Minimum: {item.minLevel}
-                    </p>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">
-                      Low Stock
-                    </span>
-                    <Button size="sm" onClick={() => handleRestock(item)}>Restock</Button>
-                  </div>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="p-8 text-center text-gray-500">
-              <Package className="w-12 h-12 mx-auto text-gray-300 mb-4" />
-              <p>All medicines are in stock</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderAnalytics = () => (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <HealthChart
-          type="bar"
-          data={orderTrends}
-          title="Weekly Order Trends"
-        />
-        <HealthChart
-          type="pie"
-          data={priorityDistribution}
-          title="Priority Distribution"
-        />
-      </div>
-    </div>
-  );
-
-  const tabs = [
-    { id: 'queue', label: 'Queue', icon: <Clock className="w-4 h-4" /> },
-    { id: 'inventory', label: 'Inventory', icon: <Package className="w-4 h-4" /> },
-    { id: 'analytics', label: 'Analytics', icon: <TrendingUp className="w-4 h-4" /> }
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200">
+    <div className="min-h-screen bg-linear-to-b from-sky-50/60 via-white to-slate-100/60">
+      {/* Enhanced Header */}
+      <header className="backdrop-blur bg-white/90 shadow-sm border-b border-sky-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <h1 className="text-xl font-semibold text-gray-900">Pharmacist Dashboard</h1>
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-linear-to-br from-sky-600 to-cyan-500 rounded-xl flex items-center justify-center shadow-md shadow-sky-200/60">
+                  <Hospital className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold text-slate-900">Pharmacy Dashboard</h1>
+                  <p className="text-xs text-slate-500">Operational Command Center</p>
+                </div>
+              </div>
             </div>
             <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-600">Pharmacist {user?.name}</span>
-              <Button variant="outline" onClick={logout}>
+              <div className="relative">
+                <Bell className="w-6 h-6 text-slate-500 hover:text-sky-700 cursor-pointer transition-colors" />
+                {data.lowStock?.length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse"></span>
+                )}
+              </div>
+              <Link
+                to="/pharmacist/profile"
+                className="flex items-center gap-3 rounded-lg px-2 py-1 transition-colors hover:bg-sky-50"
+                aria-label="Open pharmacist profile"
+              >
+                <div className="text-right">
+                  <p className="text-sm font-semibold text-slate-900">{user?.name}</p>
+                  <p className="text-xs text-slate-500">Pharmacist</p>
+                </div>
+                <div className="w-10 h-10 bg-linear-to-br from-slate-100 to-slate-200 rounded-full flex items-center justify-center border border-slate-200">
+                  <Users className="w-5 h-5 text-slate-600" />
+                </div>
+              </Link>
+              <Button variant="outline" onClick={logout} className="text-sm">
                 Logout
               </Button>
             </div>
@@ -443,140 +284,331 @@ const PharmacistDashboard = () => {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Welcome Section */}
+        <div className="mb-8 bg-linear-to-r from-sky-700 via-sky-600 to-cyan-600 rounded-2xl p-8 text-white shadow-lg shadow-sky-300/40 border border-sky-300/30">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-3xl font-bold mb-2">Welcome back, {user?.name}!</h2>
+              <p className="text-sky-100 text-lg">Here is your pharmacy overview for today</p>
+              <div className="flex items-center space-x-4 mt-4">
+                <div className="flex items-center space-x-2">
+                  <Calendar className="w-5 h-5" />
+                  <span className="text-sm">{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Clock className="w-5 h-5" />
+                  <span className="text-sm">{new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-5xl font-bold opacity-20">
+                <Package className="w-24 h-24" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {statCards.map((card, index) => (
+            <div key={index} className="bg-white/95 rounded-xl shadow-sm hover:shadow-lg transition-all duration-300 p-6 border border-sky-100 hover:border-sky-200">
+              <div className="flex items-center justify-between mb-4">
+                <div className={`w-12 h-12 bg-linear-to-br ${card.color} rounded-lg flex items-center justify-center text-white`}>
+                  {card.icon}
+                </div>
+                <div className={`flex items-center space-x-1 text-sm font-semibold ${
+                  card.trendUp ? 'text-green-600' : 'text-red-600'
+                }`}>
+                  {card.trendUp ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
+                  <span>{card.trend}</span>
+                </div>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">{card.value}</p>
+                <p className="text-sm text-slate-600">{card.title}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
         {/* Quick Actions */}
         <div className="mb-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <h3 className="text-xl font-bold text-slate-900 mb-6 flex items-center">
+            <Zap className="w-6 h-6 mr-2 text-yellow-500" />
+            Quick Actions
+          </h3>
+          {lastUpdated && (
+            <p className="-mt-4 mb-4 text-xs text-slate-500">
+              Auto-refresh every 20s. Last updated at {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </p>
+          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {quickActions.map((action, index) => (
-              <button
+              <Link
                 key={index}
-                onClick={() => setActiveTab(action.tab)}
-                className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow cursor-pointer"
+                to={action.path}
+                className="group bg-white/95 rounded-xl shadow-sm hover:shadow-lg transition-all duration-300 p-6 border border-sky-100 hover:border-sky-300"
               >
-                <div className="flex items-center space-x-4">
-                  <div className={`w-12 h-12 ${action.color} rounded-lg flex items-center justify-center text-white`}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className={`w-14 h-14 ${action.color} rounded-xl flex items-center justify-center text-white shadow-lg`}>
                     {action.icon}
                   </div>
-                  <div>
-                    <h3 className="font-medium text-gray-900">{action.title}</h3>
-                    <p className="text-sm text-gray-600">{action.description}</p>
-                  </div>
+                  {action.count !== undefined && (
+                    <span className="text-2xl font-bold text-slate-900">{action.count}</span>
+                  )}
                 </div>
-              </button>
+                <div>
+                  <h4 className="font-bold text-slate-900 mb-1">{action.title}</h4>
+                  <p className="text-sm text-slate-600">{action.description}</p>
+                  {action.trend && (
+                    <div className="flex items-center space-x-1 mt-2">
+                      <span className="text-xs font-semibold text-sky-700">{action.trend}</span>
+                    </div>
+                  )}
+                </div>
+              </Link>
             ))}
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="mb-8">
-          <div className="border-b border-gray-200">
-            <nav className="-mb-px flex space-x-8">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center space-x-2 py-2 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === tab.id
-                      ? 'border-blue-500 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-                >
-                  {tab.icon}
-                  <span>{tab.label}</span>
-                </button>
-              ))}
-            </nav>
+        {/* Advanced Statistics */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+          {/* Priority Orders */}
+          <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-sky-100 p-6">
+            <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center">
+              <AlertCircle className="w-5 h-5 mr-2 text-red-500" />
+              Priority Orders
+            </h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-red-50 rounded-lg p-4 border-l-4 border-red-500">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-red-900">Urgent</p>
+                    <p className="text-2xl font-bold text-red-600">
+                      {data.queue.filter(o => o.priority === 'urgent').length}
+                    </p>
+                  </div>
+                  <AlertTriangle className="w-8 h-8 text-red-500" />
+                </div>
+              </div>
+              <div className="bg-orange-50 rounded-lg p-4 border-l-4 border-orange-500">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-orange-900">High</p>
+                    <p className="text-2xl font-bold text-orange-600">
+                      {data.queue.filter(o => o.priority === 'high').length}
+                    </p>
+                  </div>
+                  <AlertCircle className="w-8 h-8 text-orange-500" />
+                </div>
+              </div>
+              <div className="bg-yellow-50 rounded-lg p-4 border-l-4 border-yellow-500">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-yellow-900">Medium</p>
+                    <p className="text-2xl font-bold text-yellow-600">
+                      {data.queue.filter(o => o.priority === 'medium').length}
+                    </p>
+                  </div>
+                  <Clock className="w-8 h-8 text-yellow-500" />
+                </div>
+              </div>
+              <div className="bg-green-50 rounded-lg p-4 border-l-4 border-green-500">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-green-900">Low</p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {data.queue.filter(o => o.priority === 'low').length}
+                    </p>
+                  </div>
+                  <CheckCircle2 className="w-8 h-8 text-green-500" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Low Stock Alert */}
+          <div className="bg-white rounded-xl shadow-sm border border-sky-100 p-6">
+            <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center">
+              <PackageOpen className="w-5 h-5 mr-2 text-yellow-500" />
+              Inventory Alerts
+            </h3>
+            <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-sm font-medium text-slate-900">Low Stock Medicines</p>
+                  <p className="text-xs text-slate-600">Showing name and current units available</p>
+                </div>
+                <span className="text-3xl font-bold text-amber-600">{data.lowStock?.length || 0}</span>
+              </div>
+              {data.lowStock && data.lowStock.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-slate-700">Top low stock items:</p>
+                  {data.lowStock.slice(0, 3).map((item, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-2 bg-white rounded border border-amber-100">
+                      <span className="text-xs text-slate-700">{item.name}</span>
+                      <span className="text-xs font-bold text-red-600">
+                        {item.stock} units (min {item.minLevel})
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <Link 
+              to="/pharmacist/inventory"
+              className="mt-4 inline-flex w-full items-center justify-center bg-sky-600 text-white text-center py-2 rounded-lg hover:bg-sky-700 transition-colors text-sm font-semibold"
+            >
+              Manage Inventory
+            </Link>
           </div>
         </div>
 
-        {/* Tab Content */}
-        {loading ? (
-          <div className="flex items-center justify-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        {/* Performance Metrics */}
+        <div className="bg-white rounded-xl shadow-sm border border-sky-100 p-6">
+          <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center">
+            <BarChart3 className="w-5 h-5 mr-2 text-indigo-500" />
+            Performance Overview
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Timer className="w-8 h-8 text-indigo-600" />
+              </div>
+              <p className="text-3xl font-bold text-slate-900">{data.stats?.averagePrepTime || 0}</p>
+              <p className="text-sm text-slate-600">Avg. Processing Time (min)</p>
+            </div>
+            <div className="text-center">
+              <div className="w-16 h-16 bg-sky-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Users2 className="w-8 h-8 text-sky-600" />
+              </div>
+              <p className="text-3xl font-bold text-slate-900">{data.queue.length}</p>
+              <p className="text-sm text-slate-600">Active Orders in Queue</p>
+            </div>
+            <div className="text-center">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <CheckCircle2 className="w-8 h-8 text-green-600" />
+              </div>
+              <p className="text-3xl font-bold text-slate-900">
+                {data.queue.filter(o => ['completed', 'delivered'].includes(o.status)).length}
+              </p>
+              <p className="text-sm text-slate-600">Completed Orders</p>
+            </div>
           </div>
-        ) : (
-          <>
-            {activeTab === 'queue' && renderQueue()}
-            {activeTab === 'inventory' && renderInventory()}
-            {activeTab === 'analytics' && renderAnalytics()}
-          </>
+        </div>
+
+        <section className="bg-white rounded-xl shadow-sm border border-sky-100 p-4 mt-8">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-slate-900">Order View</h3>
+            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1">
+              <button
+                type="button"
+                onClick={() => setOrderViewFilter('all')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${orderViewFilter === 'all' ? 'bg-sky-100 text-sky-800' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                All ({allAssignedOrders.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrderViewFilter('active')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${orderViewFilter === 'active' ? 'bg-sky-100 text-sky-800' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                Active ({data.queue.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrderViewFilter('history')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${orderViewFilter === 'history' ? 'bg-sky-100 text-sky-800' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                History ({historicalOrders.length})
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* Assigned Orders List */}
+        {(orderViewFilter === 'all' || orderViewFilter === 'active') && (
+        <section className="bg-white rounded-xl shadow-sm border border-sky-100 p-6 mt-8">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-slate-900">My Active Assigned Orders</h3>
+            <Link to="/pharmacist/queue" className="text-sm text-sky-700 hover:text-sky-900 underline">
+              Open Full Queue
+            </Link>
+          </div>
+
+          {Array.isArray(data.queue) && data.queue.length > 0 ? (
+            <div className="space-y-3">
+              {data.queue.slice(0, 6).map((order) => (
+                <div key={order._id} className="rounded-lg border border-slate-200 p-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{order?.patientDetails?.name || order?.patientId?.name || 'Patient'}</p>
+                    <p className="text-xs text-slate-600">Order ID: {order?.orderId || '-'}</p>
+                    <p className="text-xs text-slate-600">Medicines: {Array.isArray(order?.medicines) ? order.medicines.length : 0}</p>
+                    {Array.isArray(order?.prescriptionId?.prescriptionFiles) && order.prescriptionId.prescriptionFiles.length > 0 && (
+                      <div className="mt-1 text-xs">
+                        <p className="font-medium text-slate-700">Uploaded Prescriptions:</p>
+                        {order.prescriptionId.prescriptionFiles.slice(0, 1).map((file, fileIndex) => (
+                          <a
+                            key={`${order._id}-dash-prescription-${fileIndex}`}
+                            href={file?.fileUrl || file?.fileData}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block text-sky-700 underline"
+                          >
+                            {file?.title || file?.fileName || `Prescription ${fileIndex + 1}`}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {order?.emergencyPrePack && (
+                      <span className="px-2 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-700">
+                        Emergency Pre-Pack
+                      </span>
+                    )}
+                    <span className="px-2 py-1 rounded-full text-xs font-semibold bg-sky-100 text-sky-700">
+                      {order?.status || 'pending'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">No active assigned orders right now.</p>
+          )}
+        </section>
+        )}
+
+        {(orderViewFilter === 'all' || orderViewFilter === 'history') && (
+        <section className="bg-white rounded-xl shadow-sm border border-sky-100 p-6 mt-8">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-slate-900">Completed Order History</h3>
+            <span className="text-sm text-slate-500">{historicalOrders.length} records</span>
+          </div>
+
+          {historicalOrders.length > 0 ? (
+            <div className="space-y-3">
+              {historicalOrders.slice(0, 6).map((order) => (
+                <div key={`history-${order._id}`} className="rounded-lg border border-slate-200 p-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{order?.patientDetails?.name || order?.patientId?.name || 'Patient'}</p>
+                    <p className="text-xs text-slate-600">Order ID: {order?.orderId || '-'}</p>
+                    <p className="text-xs text-slate-600">Updated: {order?.updatedAt ? new Date(order.updatedAt).toLocaleString() : '-'}</p>
+                  </div>
+                  <span className="px-2 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
+                    {order?.status || 'delivered'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">No completed history yet.</p>
+          )}
+        </section>
         )}
       </main>
-
-      <Modal
-        isOpen={actionModal.isOpen}
-        onClose={closeActionModal}
-        title={actionModal.type === 'complete' ? 'Complete Preparation' : 'Dispatch Order'}
-      >
-        <div className="space-y-4">
-          {actionModal.type === 'complete' && (
-            <>
-              <Input
-                id="prep-notes"
-                label="Preparation Notes"
-                value={actionModal.notes}
-                onChange={(e) => setActionModal((prev) => ({ ...prev, notes: e.target.value }))}
-                placeholder="Optional notes"
-              />
-              <label className="flex items-center">
-                <input
-                  type="checkbox"
-                  checked={actionModal.qualityCheckPassed}
-                  onChange={(e) => setActionModal((prev) => ({ ...prev, qualityCheckPassed: e.target.checked }))}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span className="ml-2 text-sm text-gray-700">Quality check passed</span>
-              </label>
-            </>
-          )}
-
-          {actionModal.type === 'dispatch' && (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Dispatch Type</label>
-                <select
-                  value={actionModal.dispatchType}
-                  onChange={(e) => setActionModal((prev) => ({ ...prev, dispatchType: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="pickup">Pickup</option>
-                  <option value="delivery">Delivery</option>
-                </select>
-              </div>
-
-              <Input
-                id="recipient-name"
-                label="Recipient Name"
-                value={actionModal.recipientName}
-                onChange={(e) => setActionModal((prev) => ({ ...prev, recipientName: e.target.value }))}
-                placeholder="Enter recipient name"
-              />
-
-              <Input
-                id="recipient-phone"
-                label="Recipient Phone"
-                value={actionModal.recipientPhone}
-                onChange={(e) => setActionModal((prev) => ({ ...prev, recipientPhone: e.target.value }))}
-                placeholder="Enter recipient phone"
-              />
-
-              {actionModal.dispatchType === 'delivery' && (
-                <Input
-                  id="delivery-partner"
-                  label="Delivery Partner"
-                  value={actionModal.deliveryPartner}
-                  onChange={(e) => setActionModal((prev) => ({ ...prev, deliveryPartner: e.target.value }))}
-                  placeholder="Internal Delivery"
-                />
-              )}
-            </>
-          )}
-
-          <div className="flex justify-end space-x-2 pt-2">
-            <Button variant="outline" onClick={closeActionModal}>Cancel</Button>
-            <Button onClick={submitActionModal}>Submit</Button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 };

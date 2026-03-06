@@ -1,6 +1,60 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@600;700&display=swap');
 @import "tailwindcss";
 
+:root {
+  --font-sans: 'Manrope', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Sora', 'Manrope', 'Segoe UI', system-ui, sans-serif;
+
+  --bg-canvas: #f2f7fb;
+  --bg-muted: #e6f0f8;
+  --surface-0: #ffffff;
+  --surface-1: #f8fbff;
+  --surface-2: #edf4fa;
+
+  --text-900: #102235;
+  --text-700: #30475d;
+  --text-500: #5e7388;
+
+  --brand-700: #0f5ea5;
+  --brand-600: #1675c2;
+  --brand-500: #2494de;
+  --brand-400: #57afe9;
+  --brand-soft: #d7edfb;
+
+  --stroke-soft: #d8e6f2;
+  --stroke-strong: #b9d3e5;
+
+  --shadow-soft: 0 10px 28px rgb(14 42 66 / 8%);
+  --shadow-float: 0 16px 44px rgb(15 56 90 / 14%);
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes app-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
   html,
   body,
   #root {
@@ -8,67 +62,200 @@
   }
 
   body {
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+    margin: 0;
+    font-family: var(--font-sans);
+    color: var(--text-900);
+    line-height: 1.55;
+    background:
+      radial-gradient(circle at 10% 0%, rgb(123 193 238 / 22%) 0%, transparent 36%),
+      radial-gradient(circle at 90% 20%, rgb(76 160 221 / 14%) 0%, transparent 34%),
+      linear-gradient(180deg, var(--bg-muted) 0%, var(--bg-canvas) 42%, #f7fbff 100%);
   }
+
+  ::selection {
+    background-color: rgb(36 148 222 / 22%);
+    color: #0c2842;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-display);
+    color: #0f2d46;
+    letter-spacing: -0.02em;
+  }
+
+  p,
+  label,
+  span,
+  li {
+    color: var(--text-700);
+  }
+
+  a {
+    color: var(--brand-700);
+    text-decoration: none;
+    transition: color 180ms ease;
+  }
+
+  a:hover {
+    color: var(--brand-600);
+  }
+
+  input,
+  select,
+  textarea {
+    background-color: #fff;
+    border-color: var(--stroke-strong);
+    transition: border-color 160ms ease, box-shadow 160ms ease;
+  }
+
+  input:focus,
+  select:focus,
+  textarea:focus {
+    border-color: var(--brand-500);
+    box-shadow: 0 0 0 4px rgb(36 148 222 / 16%);
+    outline: none;
+  }
+}
+
+.App {
+  animation: app-fade-in 460ms ease both;
 }
 
 .hospital-bg-overlay {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  background-image: url('/hospital-background.svg');
+  background-image:
+    linear-gradient(180deg, rgb(255 255 255 / 58%) 0%, rgb(255 255 255 / 72%) 100%),
+    url('/hospital-background.svg');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  opacity: 0.16;
+  opacity: 0.22;
   z-index: 0;
 }
 
 @layer components {
   .btn-primary {
-    background-color: rgb(37 99 235);
-    color: white;
-    padding: 0.5rem 1rem;
-    border-radius: 0.5rem;
-    transition-property: all;
-    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    background: linear-gradient(135deg, var(--brand-600), var(--brand-500));
+    color: #fff;
+    border: 1px solid transparent;
+    padding: 0.58rem 1.15rem;
+    border-radius: 0.7rem;
+    font-weight: 700;
+    box-shadow: 0 10px 22px rgb(22 117 194 / 24%);
+    transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
   }
-  
+
   .btn-primary:hover {
-    background-color: rgb(29 78 216);
+    transform: translateY(-1px);
+    box-shadow: 0 14px 28px rgb(20 108 182 / 30%);
+    filter: saturate(1.03);
   }
-  
+
   .btn-secondary {
-    background-color: rgb(226 232 240);
-    color: rgb(71 85 105);
-    padding: 0.5rem 1rem;
-    border-radius: 0.5rem;
-    transition-property: all;
-    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    background-color: var(--surface-1);
+    color: var(--brand-700);
+    border: 1px solid var(--stroke-strong);
+    padding: 0.58rem 1.15rem;
+    border-radius: 0.7rem;
+    font-weight: 700;
+    transition: background-color 180ms ease, border-color 180ms ease, transform 180ms ease;
   }
-  
+
   .btn-secondary:hover {
-    background-color: rgb(203 213 225);
+    background-color: #edf6fd;
+    border-color: #93c5ea;
+    transform: translateY(-1px);
   }
-  
+
   .input-field {
-    border: 1px solid rgb(203 213 225);
-    border-radius: 0.5rem;
-    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--stroke-strong);
+    border-radius: 0.7rem;
+    padding: 0.58rem 0.85rem;
+    background-color: #fff;
+    color: var(--text-900);
     outline: 2px solid transparent;
     outline-offset: 2px;
   }
-  
-  .input-field:focus {
-    outline: 2px solid rgb(59 130 246);
-    outline-offset: 2px;
-    border-color: transparent;
+
+  .input-field::placeholder {
+    color: #7c90a6;
   }
-  
+
+  .input-field:focus {
+    outline: 2px solid rgb(36 148 222 / 26%);
+    border-color: var(--brand-500);
+  }
+
   .card {
-    background-color: white;
-    border-radius: 0.5rem;
-    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    position: relative;
+    overflow: hidden;
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 97%) 0%, rgb(245 251 255 / 96%) 100%);
+    border: 1px solid var(--stroke-soft);
+    border-radius: 1rem;
+    box-shadow: var(--shadow-soft);
     padding: 1.5rem;
+  }
+
+  .card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(140deg, rgb(87 175 233 / 12%), transparent 44%);
+  }
+}
+
+@layer utilities {
+  .surface-elevated {
+    background-color: var(--surface-0);
+    border: 1px solid var(--stroke-soft);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .animate-rise {
+    animation: rise-in 420ms ease both;
+  }
+}
+
+main > section {
+  animation: rise-in 520ms ease both;
+}
+
+main > section:nth-of-type(2) {
+  animation-delay: 70ms;
+}
+
+main > section:nth-of-type(3) {
+  animation-delay: 130ms;
+}
+
+@media (max-width: 768px) {
+  .hospital-bg-overlay {
+    opacity: 0.16;
+    background-position: 58% center;
+  }
+
+  .card {
+    border-radius: 0.85rem;
+    padding: 1.15rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
   }
 }

@@ -197,12 +197,16 @@ medicineInventorySchema.pre('save', function(next) {
 medicineInventorySchema.statics = {
   // Get low stock medicines
   async getLowStock() {
+    const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
     return this.find({
+      isActive: true,
       $or: [
-        { stock: { $lte: this.minStockLevel } },
-        { expiryDate: { $lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) } }
-      ],
-      isActive: true
+        // Stock at or below configured minimum level
+        { $expr: { $lte: ['$stock', '$minStockLevel'] } },
+        // Or expiring within the next 30 days
+        { expiryDate: { $lte: thirtyDaysFromNow } }
+      ]
     });
   },
 
