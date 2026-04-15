@@ -47,7 +47,8 @@ Implemented modules:
 ### Authentication + RBAC
 - Register/Login for `patient`, `doctor`, `pharmacist`, `admin`
 - JWT auth with protected routes
-- Role-based dashboards (`/patient`, `/doctor`, `/pharmacist`, `/admin`)
+- Role-based dashboards (`/#/patient`, `/#/doctor`, `/#/pharmacist`, `/#/admin`)
+- Frontend uses hash routing in production-safe format (examples: `/#/doctor`, `/#/patient`)
 
 ### Core Features
 - AI risk prediction + persistence

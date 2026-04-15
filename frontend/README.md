@@ -4,6 +4,10 @@ AI-Powered Healthcare Assistant - React + Vite + Tailwind CSS
 
 ## 🚀 Setup Complete
 
+### Routing Note
+- The app uses `HashRouter` to avoid 404 errors on browser refresh in static deployments.
+- Route examples: `/#/auth`, `/#/doctor`, `/#/pharmacist/inventory`.
+
 ### ✅ What's Been Set Up:
 
 1. **Tailwind CSS Configuration**
