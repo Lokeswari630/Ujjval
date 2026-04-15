@@ -234,8 +234,8 @@ const PharmacistInventory = () => {
         // Clear invalid token
         localStorage.removeItem('token');
         localStorage.removeItem('user');
-        // Redirect to login
-        window.location.href = '/login';
+        // Use root path for hosts that do not rewrite /login.
+        window.location.href = '/';
       } else if (error.response?.status === 404) {
         alert('Endpoint Error: The add medicine endpoint was not found. Please check the server configuration.');
       } else {

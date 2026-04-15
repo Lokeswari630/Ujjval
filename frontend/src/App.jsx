@@ -18,6 +18,7 @@ import PatientProfile from "./pages/PatientProfile";
 import DoctorProfile from "./pages/DoctorProfile";
 import AdminProfile from "./pages/AdminProfile";
 import PharmacistProfile from "./pages/PharmacistProfile";
+import NotFound from "./pages/NotFound";
 
 /* Appointments */
 import Appointments from "./pages/Appointments";
@@ -375,7 +376,7 @@ function App() {
 
                 {/* -------- Catch All -------- */}
 
-                <Route path="*" element={<RoleHomeRedirect />} />
+                <Route path="*" element={<NotFound />} />
 
               </Routes>
 

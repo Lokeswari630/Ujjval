@@ -211,7 +211,7 @@ const PharmacistProfile = () => {
           <div className="space-x-3">
             <Button onClick={loadProfile}>Try Again</Button>
             {error.includes('Authentication') || error.includes('token') ? (
-              <Button onClick={() => window.location.href = '/login'}>
+              <Button onClick={() => window.location.href = '/'}>
                 Login Again
               </Button>
             ) : null}
