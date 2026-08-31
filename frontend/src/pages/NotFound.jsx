@@ -41,7 +41,7 @@ const NotFound = () => {
               className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
               <ArrowLeft className="h-4 w-4" />
-              Back to Main 
+              Back to home
             </Link>
           </div>
         </div>
